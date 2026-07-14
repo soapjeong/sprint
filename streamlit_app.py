@@ -88,7 +88,7 @@ if 'user_role' not in st.session_state:
 if 'selected_user' not in st.session_state:
     st.session_state['selected_user'] = 'SUB_01'
 
-st.sidebar.title("🔐 권한 제어 센터")
+st.sidebar.title("권한 제어 센터")
 role_options = ['일반 사용자(개인용 뷰)', '실험 운영자(대조 관리용 뷰)']
 selected_role = st.sidebar.selectbox("접속 권한을 선택하세요:", options=role_options, index=role_options.index(st.session_state['user_role']))
 st.session_state['user_role'] = selected_role
@@ -97,7 +97,7 @@ if st.session_state['user_role'] == '일반 사용자(개인용 뷰)':
     user_ids = list(USER_META.keys())
     user_labels = [f"{uid} · {USER_META[uid]['name']}" for uid in user_ids]
     current_index = user_ids.index(st.session_state['selected_user'])
-    picked_label = st.sidebar.selectbox("🙋 사용자 계정 선택 (데모용):", options=user_labels, index=current_index)
+    picked_label = st.sidebar.selectbox("사용자 계정 선택:", options=user_labels, index=current_index)
     st.session_state['selected_user'] = user_ids[user_labels.index(picked_label)]
 
 st.sidebar.divider()
@@ -161,7 +161,7 @@ if st.session_state['user_role'] == '일반 사용자(개인용 뷰)':
     col3.metric(label="자극 참여 횟수", value=f"{len(df_user)} 회")
     
     st.divider()
-    st.subheader("나의 자극 조건별 입면 잠복기 변화")
+    st.subheader("나의 입면 잠복기 변화")
     if not df_user.empty:
         fig_personal = px.line(
             df_user,
