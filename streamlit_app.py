@@ -81,7 +81,7 @@ def load_active_data():
 df_all = load_active_data()
 
 # ------------------------------------------------------------------
-# 4. 세션 상태 초기화 및 사이드바 로직 (이전과 동일)
+# 4. 세션 상태 초기화 및 사이드바 로직
 # ------------------------------------------------------------------
 if 'user_role' not in st.session_state:
     st.session_state['user_role'] = '일반 사용자(개인용 뷰)'
@@ -131,27 +131,136 @@ if st.session_state['user_role'] == '일반 사용자(개인용 뷰)':
     st.progress(meta['progress'])
     st.caption(f"현재 {meta['phase_label']} 단계입니다. (진행도 {meta['progress']}%)")
 
-    # [코칭 메시지 생략 - 동일]
+    # 코칭 메시지
+    if phase == 1:
+        st.warning(
+            "🧪 **오늘 밤 수면 코칭 (콜드스타트 진행 중)**\n\n"
+            "아직 회원님의 반응 데이터가 충분히 쌓이지 않았습니다. "
+            "현재는 기본 세팅인 **[ 38~40℃ 가온 단독 ]** 조건으로 반응을 탐색하고 있으며, "
+            "데이터가 더 모이면 맞춤 추천이 시작됩니다."
+        )
+    elif phase == 2:
+        st.info(
+            f"🔎 **오늘 밤 수면 코칭 (표현형 분류 중)**\n\n"
+            f"현재까지의 반응 경향으로 볼 때 회원님은 **'{meta['phenotype']}'**에 가까운 것으로 잠정 분류되었습니다. "
+            "정확한 분류를 위해 오늘 밤은 **[ 40℃ 가온 + 10Hz 전기자극 ]** 조합으로 반응을 한 번 더 확인합니다."
+        )
+    else:
+        st.success(
+            f"💡 **오늘 밤 수면 코칭 (추천 세팅)**\n\n"
+            f"알고리즘 분석 결과, 회원님은 **'{meta['phenotype']}'**으로 분류되었습니다. "
+            "현재까지의 데이터를 바탕으로 오늘 밤 가장 입면 효율이 높을 것으로 계산된 "
+            "**[ 40℃ 가온 + 10Hz 전기자극 ]** 조합을 기기에 세팅합니다."
+        )
     
     st.divider()
     col1, col2, col3 = st.columns(3)
     if not df_user.empty:
-        col1.metric(label="⏱️ 최단 입면 시간", value=f"{df_user['SOL_입면시간(분)'].min()} 분")
-    col2.metric(label="🎯 현재 알고리즘 신뢰도", value=f"{meta['progress']} %")
-    col3.metric(label="📅 자극 참여 횟수", value=f"{len(df_user)} 회")
+        col1.metric(label="최단 입면 시간", value=f"{df_user['SOL_입면시간(분)'].min()} 분")
+    col2.metric(label="현재 알고리즘 신뢰도", value=f"{meta['progress']} %")
+    col3.metric(label="자극 참여 횟수", value=f"{len(df_user)} 회")
     
     st.divider()
-    st.subheader("📈 나의 자극 조건별 입면 잠복기(SOL) 변화")
+    st.subheader("나의 자극 조건별 입면 잠복기 변화")
     if not df_user.empty:
-        fig_personal = px.line(df_user, x='날짜', y='SOL_입면시간(분)', text='SOL_입면시간(분)', markers=True)
+        fig_personal = px.line(
+            df_user,
+            x='날짜',
+            y='SOL_입면시간(분)',
+            text='SOL_입면시간(분)',
+            markers=True,
+            title="자극 세팅 변화에 따른 잠드는 시간 추이",
+        )
         fig_personal.update_traces(textposition="top center")
+        fig_personal.update_layout(yaxis_title="잠드는 데 걸린 시간 (분)", xaxis_title="실험 일자")
         st.plotly_chart(fig_personal, width='stretch')
+    else:
+        st.info("아직 표시할 데이터가 없습니다.")
 
 # ==================================================================
 # [CASE 2] 실험 운영자 / 연구자(대조 관리용 뷰)
 # ==================================================================
 else:
-    # [운영자 뷰 로직 생략 - 동일]
     st.title("🔬 DormX 실험 운영자 및 연구자 관리 시스템")
+    st.markdown("전체 피험자(3명)의 Active 조건 원시 데이터 분석 및 수면 구조 통계 화면입니다.")
+    st.divider()
+
+    # 피험자별 Phase 현황 요약
     st.subheader("👥 피험자별 알고리즘 진행 현황")
-    # (연구자 뷰 구현부는 이전 코드 그대로 사용하시면 됩니다.)
+    summary_cols = st.columns(3)
+    for col, (sub_id, meta) in zip(summary_cols, USER_META.items()):
+        with col:
+            st.markdown(f"**{sub_id} · {meta['name']}**")
+            st.caption(meta['phase_label'])
+            st.progress(meta['progress'])
+    st.divider()
+
+    # 연구자용 필터: 피험자 + Active 세팅
+    st.subheader("🔍 데이터 세부 필터링")
+    filter_col1, filter_col2 = st.columns(2)
+
+    with filter_col1:
+        selected_subjects = st.multiselect(
+            "분석할 피험자 선택:",
+            options=list(USER_META.keys()),
+            default=list(USER_META.keys()),
+        )
+
+    # 선택된 피험자 범위 내에서만 조건군 옵션 구성 (존재하지 않는 조합 방지)
+    subject_scoped_df = df_all[df_all['피험자ID'].isin(selected_subjects)] if selected_subjects else df_all.iloc[0:0]
+    condition_options = subject_scoped_df['조건군'].unique() if not subject_scoped_df.empty else []
+
+    with filter_col2:
+        selected_condition = st.multiselect(
+            "분석할 Active 세팅 선택:",
+            options=condition_options,
+            default=list(condition_options),
+        )
+
+    # 필터 적용 데이터
+    if selected_subjects and selected_condition:
+        filtered_df = subject_scoped_df[subject_scoped_df['조건군'].isin(selected_condition)]
+    else:
+        filtered_df = df_all.iloc[0:0]
+
+    st.divider()
+
+    # 연구자용 고도화 시각화: 수면 단계 구성비(Melt 구조)
+    st.subheader("📊 필터링된 Active 데이터의 수면 단계 구성비")
+    if not filtered_df.empty:
+        melted_df = filtered_df.melt(
+            id_vars=['피험자ID', '날짜', '조건군'],
+            value_vars=['깊은수면(%)', '코어수면(%)', 'REM수면(%)'],
+            var_name='수면단계',
+            value_name='비율(%)',
+        )
+        fig_research = px.bar(
+            melted_df,
+            x='날짜',
+            y='비율(%)',
+            color='수면단계',
+            facet_col='피험자ID',
+            hover_data=['조건군'],
+            barmode='stack',
+            color_discrete_map={
+                '깊은수면(%)': '#312c66',
+                '코어수면(%)': '#4e89ff',
+                'REM수면(%)': '#5bcaf0',
+            },
+        )
+        st.plotly_chart(fig_research, width='stretch')
+
+        # 원본 데이터 테이블 및 다운로드 기능
+        st.subheader("📋 모니터링 원본 데이터셋")
+        st.dataframe(filtered_df, width='stretch', hide_index=True)
+
+        # CSV 다운로드 버튼
+        csv = filtered_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 선택된 데이터 CSV 다운로드",
+            data=csv,
+            file_name="DormX_Active_Data.csv",
+            mime="text/csv",
+        )
+    else:
+        st.warning("필터 조건에 부합하는 데이터가 없습니다. 피험자와 세팅을 하나 이상 선택해주세요.")
