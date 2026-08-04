@@ -1,10 +1,10 @@
-# 백엔드 (FastAPI 서버 + 시리얼 어댑터)
+# Backend (FastAPI server + serial adapter)
 fastapi
 uvicorn[standard]
 pyserial
 websockets
 
-# Streamlit 대시보드
+# Streamlit dashboard
 streamlit
 pandas
 plotly
