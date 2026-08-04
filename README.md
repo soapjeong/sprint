@@ -9,12 +9,14 @@ ESP32 기반 개인 맞춤 입면(수면 개시) 온도 탐색기의 PC측 소�
 ```
 backend/                 FastAPI 백엔드 — 시리얼 연결을 단독으로 소유
   connection.py             DeviceConnection 인터페이스 + SerialDeviceConnection 구현
+  mock_connection.py        DeviceConnection의 하드웨어 없는 테스트용 구현 (--mock)
   parsing.py                "[진행상태]" / "@RESULT" 원문 파싱
   log_writer.py             CSV/이벤트 로그 파일 기록 (기존 파일 포맷 그대로)
   state.py                  서버 프로세스 내 공유 상태 + WebSocket 브로드캐스트
   main.py                   REST API, WebSocket, 정적 파일(폰 페이지) 서빙
 run.py                   백엔드 실행 스크립트 (CLI 옵션)
 phone/index.html         폰 전용 경량 컨트롤 페이지 (반응형, 바닐라 HTML/JS, 빌드 불필요)
+phone/simulator.html     ESP32 없이 값을 직접 주입해서 테스트하는 시뮬레이터 페이지
 realtime_dashboard.py    기존 Streamlit 대시보드 (읽기 전용, PC용 상세 분석)
 logs/                     센서 CSV / 이벤트 로그 저장 폴더 (백엔드가 기록)
 sleep_onset_temp_optimizer_v3_real_hw.ino   ESP32 펌웨어 (프로토콜 변경 없음)
@@ -61,7 +63,21 @@ python run.py --serial-port COM5             # Windows
 폰 브라우저로 위 URL(`http://<LAN IP>:8000/`)에 접속하면 바로 컨트롤 페이지가 뜹니다.
 별도 서버를 띄울 필요 없이 백엔드가 정적 파일까지 서빙합니다.
 
-### 4. (선택) PC에서 상세 분석 대시보드
+### 4. ESP32가 아직 없거나 연결이 안 될 때 — Mock 모드
+
+하드웨어 없이도 백엔드/폰 페이지를 전부 테스트할 수 있습니다.
+
+```bash
+python run.py --mock
+```
+
+이 경우 시리얼 대신 `http://<LAN IP>:8000/simulator.html` 에서 슬라이더로 값을 직접
+주입할 수 있습니다. 주입한 값은 실제 ESP32가 보낸 것과 동일한 경로(파싱 → CSV/이벤트
+로깅 → WebSocket 브로드캐스트)를 그대로 타므로, `index.html`(실제 컨트롤 화면)을 다른
+탭/폰에서 열어두면 시뮬레이터에서 값을 바꿀 때마다 그대로 반영되는 걸 볼 수 있습니다.
+"FAULT 발생" 같은 프리셋 버튼으로 안전 경고 화면도 하드웨어 없이 테스트할 수 있습니다.
+
+### 5. (선택) PC에서 상세 분석 대시보드
 
 ```bash
 streamlit run realtime_dashboard.py

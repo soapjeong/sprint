@@ -22,7 +22,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .connection import SerialDeviceConnection
 from .log_writer import SessionLogWriter
-from .models import CommandRequest
+from .mock_connection import MockDeviceConnection
+from .models import CommandRequest, MockResultRequest, MockStatusRequest
 from .parsing import START_REJECTED_MARKER, now_iso, parse_progress_line, parse_result_event
 from .state import state
 
@@ -96,14 +97,19 @@ async def lifespan(app: FastAPI):
     log_dir = os.environ.get("SLEEP_LOG_DIR", "./logs")
     state.log_writer = SessionLogWriter(log_dir)
 
-    serial_port = os.environ.get("SLEEP_SERIAL_PORT") or None
-    baud = int(os.environ.get("SLEEP_SERIAL_BAUD", "115200"))
-    state.device = SerialDeviceConnection(port=serial_port, baud=baud)
+    if os.environ.get("SLEEP_MOCK") == "1":
+        state.device = MockDeviceConnection()
+    else:
+        serial_port = os.environ.get("SLEEP_SERIAL_PORT") or None
+        baud = int(os.environ.get("SLEEP_SERIAL_BAUD", "115200"))
+        state.device = SerialDeviceConnection(port=serial_port, baud=baud)
     state.device.start(handle_device_line)
 
     http_port = os.environ.get("SLEEP_HTTP_PORT", "8000")
     print(f"[백엔드] 센서 CSV : {state.log_writer.csv_path}")
     print(f"[백엔드] 이벤트 로그: {state.log_writer.event_path}")
+    if isinstance(state.device, MockDeviceConnection):
+        print(f"[백엔드] MOCK 모드 — ESP32 없이 실행 중. 시뮬레이터: http://{get_lan_ip()}:{http_port}/simulator.html")
     print(f"[백엔드] 폰 컨트롤 페이지: http://{get_lan_ip()}:{http_port}/")
 
     yield
@@ -129,7 +135,7 @@ async def get_status():
     device = state.device
     return {
         "connected": device.is_connected() if device else False,
-        "port": device.port if device else None,
+        "port": getattr(device, "port", None),
         "status": state.latest_status,
         "last_result": state.latest_result,
         "csv_path": state.log_writer.csv_path if state.log_writer else None,
@@ -188,6 +194,52 @@ async def send_command(req: CommandRequest):
         raise HTTPException(503, detail=str(e))
 
     return {"status": "sent", "cmd": text}
+
+
+@app.get("/api/mock")
+async def get_mock_enabled():
+    return {"enabled": isinstance(state.device, MockDeviceConnection)}
+
+
+def _require_mock() -> MockDeviceConnection:
+    if not isinstance(state.device, MockDeviceConnection):
+        raise HTTPException(
+            400,
+            detail="목데이터 주입은 백엔드를 --mock 모드로 실행했을 때만 가능합니다.",
+        )
+    return state.device
+
+
+@app.post("/api/mock/status")
+async def inject_mock_status(req: MockStatusRequest):
+    device = _require_mock()
+    # 펌웨어 logCsv()와 동일한 "[진행상태] ..." 형식으로 조립해서, 실제 장치가 보낸 것과
+    # 완전히 같은 파싱/로깅/브로드캐스트 경로를 그대로 타게 한다.
+    line = (
+        f"[진행상태] 시간:{int(req.elapsed_sec)}초 | "
+        f"피부온도:{req.skin_temp_c:.1f}℃ | "
+        f"히터온도:{req.heater_temp_c:.1f}℃ | "
+        f"목표:{req.target_temp_c:.1f}℃ | "
+        f"히터파워:{req.heater_power_pct:.0f}% | "
+        f"심박수:{req.heart_rate_bpm:.0f}BPM | "
+        f"안전:{req.safety_state} | "
+        f"세션:{req.session_state} | "
+        f"연속수면(분):{req.sleep_minutes} | "
+        f"판정:{req.sleep_judgement}"
+    )
+    device.inject_line(line)
+    return {"status": "injected", "line": line}
+
+
+@app.post("/api/mock/result")
+async def inject_mock_result(req: MockResultRequest):
+    device = _require_mock()
+    line = (
+        f"@RESULT,{req.person_id},{req.session_temp_c:.1f},{req.sol_min:.2f},"
+        f"{1 if req.converged else 0},{req.best_temp_c:.1f},{req.best_sol_min:.2f},{req.next_temp_c:.1f}"
+    )
+    device.inject_line(line)
+    return {"status": "injected", "line": line}
 
 
 @app.websocket("/ws/live")

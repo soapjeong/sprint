@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>수면 온도 컨트롤 — 시뮬레이터</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f7f9fc;
+    --card: #ffffff;
+    --card-border: #e3e8ef;
+    --text: #1a2230;
+    --text-dim: #6b7686;
+    --accent: #3a6fe0;
+    --accent-dim: #e7edfb;
+    --ok: #1f8f7f;
+    --warn: #b5790a;
+    --danger: #d92d3f;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #banner {
+    background: linear-gradient(135deg, #b5790a, #946109);
+    color: white;
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 8px 10px;
+  }
+  #app {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 12px 14px calc(env(safe-area-inset-bottom, 12px) + 24px);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  header { padding: 10px 2px 4px; }
+  header h1 { font-size: 1.15rem; margin: 0 0 2px; font-weight: 700; }
+  header p { margin: 0; font-size: 0.82rem; color: var(--text-dim); }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .card h2 { font-size: 0.92rem; margin: 0 0 12px; color: var(--text-dim); }
+
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    border: 1px solid var(--card-border);
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .chip.danger { background: rgba(217,45,63,0.1); color: var(--danger); }
+  .chip.ok { background: rgba(31,143,127,0.1); color: var(--ok); }
+
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  .field label span.val { color: var(--accent); font-weight: 700; }
+  .field input[type="range"] { width: 100%; accent-color: var(--accent); height: 30px; }
+  .field input[type="number"],
+  .field select {
+    width: 100%;
+    padding: 11px 12px;
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .row-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+
+  .btn {
+    border: none;
+    border-radius: 14px;
+    padding: 16px 10px;
+    font-size: 1rem;
+    font-weight: 800;
+    color: white;
+    cursor: pointer;
+    width: 100%;
+    -webkit-user-select: none;
+    user-select: none;
+    transition: transform 0.08s ease, opacity 0.2s;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary { background: linear-gradient(135deg, #3a6fe0, #2c58c0); }
+  .btn-secondary { background: rgba(26,34,48,0.06); color: var(--text); }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    background: #1a2230;
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #f2f5fa;
+    padding: 10px 16px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    z-index: 50;
+    max-width: 90vw;
+    text-align: center;
+  }
+  .toast.error { color: #ff9aa4; border-color: rgba(217,45,63,0.5); }
+  .toast.hidden { display: none; }
+
+  a.link { color: var(--accent); text-decoration: none; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="banner">🧪 SIMULATOR — 실제 ESP32 없이 값을 직접 주입합니다 (백엔드가 --mock 으로 실행 중이어야 함)</div>
+
+<div id="app">
+  <header>
+    <h1>🎛️ 데이터 시뮬레이터</h1>
+    <p id="mock-state">백엔드 mock 상태 확인 중...</p>
+  </header>
+
+  <section class="card">
+    <h2>빠른 시나리오</h2>
+    <div class="presets">
+      <button class="chip ok" data-preset="normal">정상 · 가열중</button>
+      <button class="chip" data-preset="sleep">수면 진입</button>
+      <button class="chip danger" data-preset="fault">FAULT 발생</button>
+      <button class="chip" data-preset="idle">작동 전으로 리셋</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>센서 값 (실시간 상태로 주입)</h2>
+
+    <div class="field">
+      <label>피부온도 <span class="val" id="v-skin">36.5℃</span></label>
+      <input type="range" id="skin" min="25" max="45" step="0.1" value="36.5" />
+    </div>
+    <div class="field">
+      <label>히터온도 <span class="val" id="v-heater">37.2℃</span></label>
+      <input type="range" id="heater" min="25" max="48" step="0.1" value="37.2" />
+    </div>
+    <div class="field">
+      <label>목표온도 <span class="val" id="v-target">39.0℃</span></label>
+      <input type="range" id="target" min="37.5" max="40.5" step="0.1" value="39.0" />
+    </div>
+    <div class="field">
+      <label>히터파워 <span class="val" id="v-power">45%</span></label>
+      <input type="range" id="power" min="0" max="100" step="1" value="45" />
+    </div>
+    <div class="field">
+      <label>심박수 <span class="val" id="v-hr">68 BPM</span></label>
+      <input type="range" id="hr" min="30" max="140" step="1" value="68" />
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label>안전상태</label>
+        <select id="safety">
+          <option value="NORMAL">NORMAL</option>
+          <option value="FAULT_OVERTEMP_SKIN">FAULT_OVERTEMP_SKIN</option>
+          <option value="FAULT_OVERTEMP_HEATER">FAULT_OVERTEMP_HEATER</option>
+          <option value="FAULT_SPIKE_SKIN">FAULT_SPIKE_SKIN</option>
+          <option value="FAULT_SPIKE_HEATER">FAULT_SPIKE_HEATER</option>
+          <option value="FAULT_SENSOR">FAULT_SENSOR</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>세션상태</label>
+        <select id="session">
+          <option value="IDLE">IDLE</option>
+          <option value="RUNNING" selected>RUNNING</option>
+          <option value="COOLDOWN">COOLDOWN</option>
+          <option value="DONE">DONE</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label>경과시간(초)</label>
+        <input type="number" id="elapsed" value="30" min="0" />
+      </div>
+      <div class="field">
+        <label>연속수면(분)</label>
+        <input type="number" id="sleepmin" value="0" min="0" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>수면판정</label>
+      <select id="judgement">
+        <option value="깨어있음">깨어있음</option>
+        <option value="수면중">수면중</option>
+      </select>
+    </div>
+
+    <div class="row-check" style="margin-bottom: 12px;">
+      <input type="checkbox" id="auto-send" />
+      <label for="auto-send">1초마다 자동으로 계속 전송 (실제 장치처럼 흘려보내기)</label>
+    </div>
+
+    <button class="btn btn-primary" id="btn-send">📡 이 상태 전송</button>
+  </section>
+
+  <section class="card">
+    <h2>세션 결과(@RESULT) 주입</h2>
+    <div class="grid2">
+      <div class="field">
+        <label>세션온도(℃)</label>
+        <input type="number" id="r-temp" value="39.5" step="0.1" />
+      </div>
+      <div class="field">
+        <label>SOL(분)</label>
+        <input type="number" id="r-sol" value="12.3" step="0.1" />
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label>최적온도(℃)</label>
+        <input type="number" id="r-best-temp" value="39.5" step="0.1" />
+      </div>
+      <div class="field">
+        <label>최적SOL(분)</label>
+        <input type="number" id="r-best-sol" value="12.3" step="0.1" />
+      </div>
+    </div>
+    <div class="field">
+      <label>다음추천온도(℃)</label>
+      <input type="number" id="r-next-temp" value="39.8" step="0.1" />
+    </div>
+    <div class="row-check" style="margin-bottom: 12px;">
+      <input type="checkbox" id="r-converged" checked />
+      <label for="r-converged">탐색 수렴됨</label>
+    </div>
+    <button class="btn btn-secondary" id="btn-send-result">🏁 결과 전송</button>
+  </section>
+
+  <p style="font-size: 0.8rem; color: var(--text-dim); text-align: center; line-height: 1.6;">
+    실제 컨트롤 화면은 <a class="link" href="./index.html">index.html</a> 에서 다른 탭/폰으로 열어두고,
+    여기서 값을 바꾸면 그쪽 화면이 실시간으로 반응하는지 확인하세요.
+  </p>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+
+  const el = {
+    skin: $("skin"), vSkin: $("v-skin"),
+    heater: $("heater"), vHeater: $("v-heater"),
+    target: $("target"), vTarget: $("v-target"),
+    power: $("power"), vPower: $("v-power"),
+    hr: $("hr"), vHr: $("v-hr"),
+    safety: $("safety"),
+    session: $("session"),
+    elapsed: $("elapsed"),
+    sleepmin: $("sleepmin"),
+    judgement: $("judgement"),
+    autoSend: $("auto-send"),
+    btnSend: $("btn-send"),
+    mockState: $("mock-state"),
+    toast: $("toast"),
+    rTemp: $("r-temp"), rSol: $("r-sol"),
+    rBestTemp: $("r-best-temp"), rBestSol: $("r-best-sol"),
+    rNextTemp: $("r-next-temp"), rConverged: $("r-converged"),
+    btnSendResult: $("btn-send-result"),
+  };
+
+  let toastTimer = null;
+  function showToast(msg, isError) {
+    el.toast.textContent = msg;
+    el.toast.classList.toggle("error", !!isError);
+    el.toast.classList.remove("hidden");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.toast.classList.add("hidden"), 2200);
+  }
+
+  function bindSlider(input, out, unit, digits) {
+    const render = () => { out.textContent = `${parseFloat(input.value).toFixed(digits)}${unit}`; };
+    input.addEventListener("input", render);
+    render();
+  }
+  bindSlider(el.skin, el.vSkin, "℃", 1);
+  bindSlider(el.heater, el.vHeater, "℃", 1);
+  bindSlider(el.target, el.vTarget, "℃", 1);
+  bindSlider(el.power, el.vPower, "%", 0);
+  bindSlider(el.hr, el.vHr, " BPM", 0);
+
+  async function checkMockEnabled() {
+    try {
+      const res = await fetch("/api/mock");
+      const body = await res.json();
+      el.mockState.textContent = body.enabled
+        ? "✅ 백엔드가 mock 모드로 실행 중입니다."
+        : "⚠️ 백엔드가 mock 모드가 아닙니다 — python run.py --mock 으로 다시 실행하세요.";
+    } catch (e) {
+      el.mockState.textContent = "⚠️ 백엔드에 연결할 수 없습니다.";
+    }
+  }
+  checkMockEnabled();
+
+  function currentStatusPayload() {
+    return {
+      elapsed_sec: parseFloat(el.elapsed.value) || 0,
+      skin_temp_c: parseFloat(el.skin.value),
+      heater_temp_c: parseFloat(el.heater.value),
+      target_temp_c: parseFloat(el.target.value),
+      heater_power_pct: parseFloat(el.power.value),
+      heart_rate_bpm: parseFloat(el.hr.value),
+      safety_state: el.safety.value,
+      session_state: el.session.value,
+      sleep_minutes: parseInt(el.sleepmin.value, 10) || 0,
+      sleep_judgement: el.judgement.value,
+    };
+  }
+
+  async function sendStatus(showFeedback) {
+    try {
+      const res = await fetch("/api/mock/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(currentStatusPayload()),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(body.detail || "전송 실패", true); return; }
+      if (showFeedback) showToast("상태 전송됨");
+    } catch (e) {
+      showToast("네트워크 오류", true);
+    }
+  }
+
+  el.btnSend.addEventListener("click", () => sendStatus(true));
+
+  let autoTimer = null;
+  el.autoSend.addEventListener("change", () => {
+    if (el.autoSend.checked) {
+      showToast("자동 전송 시작 (1초마다)");
+      autoTimer = setInterval(() => {
+        el.elapsed.value = (parseFloat(el.elapsed.value) || 0) + 1;
+        sendStatus(false);
+      }, 1000);
+    } else {
+      clearInterval(autoTimer);
+      showToast("자동 전송 중지");
+    }
+  });
+
+  el.btnSendResult.addEventListener("click", async () => {
+    const payload = {
+      person_id: "default",
+      session_temp_c: parseFloat(el.rTemp.value),
+      sol_min: parseFloat(el.rSol.value),
+      converged: el.rConverged.checked,
+      best_temp_c: parseFloat(el.rBestTemp.value),
+      best_sol_min: parseFloat(el.rBestSol.value),
+      next_temp_c: parseFloat(el.rNextTemp.value),
+    };
+    try {
+      const res = await fetch("/api/mock/result", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(body.detail || "전송 실패", true); return; }
+      showToast("결과 전송됨");
+    } catch (e) {
+      showToast("네트워크 오류", true);
+    }
+  });
+
+  function applyPreset(name) {
+    if (name === "normal") {
+      el.safety.value = "NORMAL"; el.session.value = "RUNNING";
+      el.skin.value = 37.5; el.heater.value = 38.2; el.target.value = 39.0;
+      el.power.value = 55; el.hr.value = 66; el.judgement.value = "깨어있음";
+      el.sleepmin.value = 0;
+    } else if (name === "sleep") {
+      el.safety.value = "NORMAL"; el.session.value = "COOLDOWN";
+      el.skin.value = 39.0; el.heater.value = 39.4; el.target.value = 39.0;
+      el.power.value = 30; el.hr.value = 58; el.judgement.value = "수면중";
+      el.sleepmin.value = 5;
+    } else if (name === "fault") {
+      el.safety.value = "FAULT_OVERTEMP_SKIN"; el.session.value = "RUNNING";
+      el.skin.value = 43.0; el.heater.value = 44.5; el.power.value = 0;
+      el.judgement.value = "깨어있음";
+    } else if (name === "idle") {
+      el.safety.value = "NORMAL"; el.session.value = "IDLE";
+      el.power.value = 0; el.elapsed.value = 0; el.sleepmin.value = 0;
+      el.judgement.value = "깨어있음";
+    }
+    [el.skin, el.heater, el.target, el.power, el.hr].forEach((i) => i.dispatchEvent(new Event("input")));
+    sendStatus(true);
+  }
+
+  document.querySelectorAll(".chip[data-preset]").forEach((btn) => {
+    btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
+  });
+})();
+</script>
+</body>
+</html>

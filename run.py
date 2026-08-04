@@ -6,6 +6,7 @@
     python run.py                          # 시리얼 포트 자동 탐색, 0.0.0.0:8000
     python run.py --serial-port /dev/ttyUSB0
     python run.py --serial-port COM5 --port 8080
+    python run.py --mock                   # ESP32 없이: /simulator.html 에서 값을 직접 주입해서 테스트
 
 --host를 0.0.0.0(기본값)으로 유지해야 같은 Wi-Fi의 폰에서 PC의 LAN IP로 접속할 수 있다.
 """
@@ -21,9 +22,16 @@ def main():
     parser.add_argument("--logdir", default="./logs", help="CSV/이벤트 로그 저장 폴더")
     parser.add_argument("--host", default="0.0.0.0", help="폰에서 접속하려면 0.0.0.0 유지")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="ESP32를 시리얼로 연결하지 않고, /simulator.html 에서 값을 직접 주입하는 테스트 모드로 실행",
+    )
     args = parser.parse_args()
 
-    if args.serial_port:
+    if args.mock:
+        os.environ["SLEEP_MOCK"] = "1"
+    elif args.serial_port:
         os.environ["SLEEP_SERIAL_PORT"] = args.serial_port
     os.environ["SLEEP_SERIAL_BAUD"] = str(args.baud)
     os.environ["SLEEP_LOG_DIR"] = args.logdir
