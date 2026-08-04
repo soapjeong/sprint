@@ -18,6 +18,10 @@ class AppState:
         self.latest_status: Optional[dict] = None
         self.latest_result: Optional[dict] = None
         self.results: list[dict] = []
+        # 펌웨어의 "시간(초)" 필드는 세션 기준이 아니라 ESP32 부팅 이후 전체 경과시간(millis())이라
+        # 세션이 실제로 시작된 시각을 백엔드가 따로 기억해서 세션 상대 경과시간을 계산한다.
+        self.session_started_at: Optional[float] = None
+        self.last_session_state: Optional[str] = None
         self.log_writer: Optional[SessionLogWriter] = None
         self.device: Optional[DeviceConnection] = None
 

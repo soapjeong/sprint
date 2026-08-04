@@ -252,6 +252,7 @@
 
   const SESSION_MAX_SEC = 3600;
   const CHART_WINDOW_MS = 10 * 60 * 1000;
+  const STABILIZE_SEC = 10; // 세션 시작 후 이 시간 동안은 센서가 안정화 중이라 그래프에서 제외
 
   const $ = (id) => document.getElementById(id);
 
@@ -296,6 +297,7 @@
   };
 
   let lastSafety = null;
+  let lastSessionActive = false;
   let ws = null;
   let wsRetryDelay = 1000;
   let wsEverConnected = false;
@@ -333,6 +335,23 @@
       osc.start();
       osc.stop(ctx.currentTime + 0.5);
     } catch (e) { /* 무음 환경 등 오디오 실패는 무시 */ }
+  }
+
+  // -------------------------------------------------------------------
+  // 그래프용 이상치(노이즈) 필터 — 중앙값 필터로 튀는 값 하나를 흡수한다.
+  // 큰 숫자 카드는 이 필터를 거치지 않고 원본 값을 그대로 보여준다.
+  // -------------------------------------------------------------------
+  let skinNoiseBuf = [];
+  function resetSkinNoiseFilter() { skinNoiseBuf = []; }
+  function medianOfThree(a, b, c) {
+    return Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+  }
+  function filteredSkin(raw) {
+    if (raw === null || raw === undefined) { resetSkinNoiseFilter(); return null; }
+    skinNoiseBuf.push(raw);
+    if (skinNoiseBuf.length > 3) skinNoiseBuf.shift();
+    if (skinNoiseBuf.length < 3) return raw;
+    return medianOfThree(skinNoiseBuf[0], skinNoiseBuf[1], skinNoiseBuf[2]);
   }
 
   // -------------------------------------------------------------------
@@ -408,8 +427,15 @@
     el.btnStart.disabled = isActive;
     el.btnAbort.disabled = !isActive;
 
-    if (session === "RUNNING" && s.elapsed_sec !== null) {
-      const remain = Math.max(0, SESSION_MAX_SEC - s.elapsed_sec);
+    if (isActive !== lastSessionActive) {
+      resetSkinNoiseFilter();
+      lastSessionActive = isActive;
+    }
+
+    const sessionElapsed = s.session_elapsed_sec; // 세션이 실제로 시작된 시점 기준 (백엔드가 계산, ESP32 부팅 이후 시간이 아님)
+
+    if (session === "RUNNING" && sessionElapsed !== null && sessionElapsed !== undefined) {
+      const remain = Math.max(0, SESSION_MAX_SEC - sessionElapsed);
       const mm = Math.floor(remain / 60).toString().padStart(2, "0");
       const ss = Math.floor(remain % 60).toString().padStart(2, "0");
       el.countdown.textContent = `${mm}:${ss}`;
@@ -418,9 +444,18 @@
       el.countdownRow.classList.add("hidden");
     }
 
-    chartBuffer.push({ t: Date.now(), skin: s.skin_temp_c, target: s.target_temp_c });
-    const cutoff = Date.now() - CHART_WINDOW_MS;
-    while (chartBuffer.length && chartBuffer[0].t < cutoff) chartBuffer.shift();
+    // 세션 시작 직후 STABILIZE_SEC 동안은 센서가 안정화되는 구간이라 그래프에서 제외한다
+    // (큰 숫자 카드는 그대로 실시간으로 보여준다).
+    const isStabilizing =
+      (session === "RUNNING" || session === "COOLDOWN") &&
+      sessionElapsed !== null && sessionElapsed !== undefined &&
+      sessionElapsed < STABILIZE_SEC;
+
+    if (!isStabilizing) {
+      chartBuffer.push({ t: Date.now(), skin: filteredSkin(s.skin_temp_c), target: s.target_temp_c });
+      const cutoff = Date.now() - CHART_WINDOW_MS;
+      while (chartBuffer.length && chartBuffer[0].t < cutoff) chartBuffer.shift();
+    }
     drawChart();
   }
 

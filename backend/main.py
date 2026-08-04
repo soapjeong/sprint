@@ -14,6 +14,7 @@ Streamlit 대시보드가 각자 이 서버 하나만 보고 동작하게 한다
 import asyncio
 import os
 import socket
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -36,6 +37,7 @@ SESSION_MAX_SEC = 60 * 60
 
 ALLOWED_EXACT_COMMANDS = {"start", "abort", "report", "reset_profile", "r"}
 ALLOWED_PREFIX_COMMANDS = ("id ", "set ")
+ACTIVE_SESSION_STATES = ("RUNNING", "COOLDOWN")
 
 PHONE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "phone")
 
@@ -60,6 +62,19 @@ def handle_device_line(line: str) -> None:
 
     if "[진행상태]" in line:
         csv_row, status = parse_progress_line(line)
+
+        session_state = status.get("session_state")
+        is_active = session_state in ACTIVE_SESSION_STATES
+        was_active = state.last_session_state in ACTIVE_SESSION_STATES
+        if is_active and not was_active:
+            state.session_started_at = time.time()
+        elif not is_active:
+            state.session_started_at = None
+        state.last_session_state = session_state
+        status["session_elapsed_sec"] = (
+            time.time() - state.session_started_at if state.session_started_at is not None else None
+        )
+
         state.latest_status = status
         if state.log_writer:
             state.log_writer.write_progress_row(csv_row)
