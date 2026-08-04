@@ -75,6 +75,9 @@ def handle_device_line(line: str) -> None:
             result = parse_result_event(line)
             if result:
                 state.latest_result = result
+                state.results.append(result)
+                if len(state.results) > 50:
+                    state.results.pop(0)
                 state.schedule_broadcast({"type": "result", "data": result})
                 return
 
@@ -138,6 +141,7 @@ async def get_status():
         "port": getattr(device, "port", None),
         "status": state.latest_status,
         "last_result": state.latest_result,
+        "results": state.results,
         "csv_path": state.log_writer.csv_path if state.log_writer else None,
         "event_path": state.log_writer.event_path if state.log_writer else None,
         "limits": {

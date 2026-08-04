@@ -92,6 +92,21 @@
   }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
+  #power-bar {
+    width: 100%;
+    height: 14px;
+    border-radius: 999px;
+    background: rgba(26,34,48,0.08);
+    overflow: hidden;
+  }
+  #power-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #3a6fe0, #6ea0ff);
+    transition: width 0.25s ease;
+  }
+  .hint { font-size: 0.72rem; color: var(--text-dim); margin: 2px 0 0; }
+
   .row-check {
     display: flex;
     align-items: center;
@@ -173,8 +188,9 @@
       <input type="range" id="target" min="37.5" max="40.5" step="0.1" value="39.0" />
     </div>
     <div class="field">
-      <label>히터파워 <span class="val" id="v-power">45%</span></label>
-      <input type="range" id="power" min="0" max="100" step="1" value="45" />
+      <label>히터파워 (자동 계산) <span class="val" id="v-power">45%</span></label>
+      <div id="power-bar"><div id="power-bar-fill"></div></div>
+      <p class="hint">목표·피부온도 차이와 안전/세션 상태로부터 자동으로 계산됩니다 (직접 조작 불가).</p>
     </div>
     <div class="field">
       <label>심박수 <span class="val" id="v-hr">68 BPM</span></label>
@@ -281,7 +297,7 @@
     skin: $("skin"), vSkin: $("v-skin"),
     heater: $("heater"), vHeater: $("v-heater"),
     target: $("target"), vTarget: $("v-target"),
-    power: $("power"), vPower: $("v-power"),
+    vPower: $("v-power"), powerBarFill: $("power-bar-fill"),
     hr: $("hr"), vHr: $("v-hr"),
     safety: $("safety"),
     session: $("session"),
@@ -315,8 +331,27 @@
   bindSlider(el.skin, el.vSkin, "℃", 1);
   bindSlider(el.heater, el.vHeater, "℃", 1);
   bindSlider(el.target, el.vTarget, "℃", 1);
-  bindSlider(el.power, el.vPower, "%", 0);
   bindSlider(el.hr, el.vHr, " BPM", 0);
+
+  // 히터파워는 사용자가 직접 조작하지 않고, 실제 PID 히터처럼 목표-피부온도 차이와
+  // 안전/세션 상태로부터 자동 계산한다 (안전 FAULT거나 세션이 꺼져있으면 0%).
+  function computeAutoPower() {
+    if (el.safety.value !== "NORMAL") return 0;
+    if (el.session.value !== "RUNNING" && el.session.value !== "COOLDOWN") return 0;
+    const gap = parseFloat(el.target.value) - parseFloat(el.skin.value);
+    return Math.max(0, Math.min(100, Math.round(40 + gap * 25)));
+  }
+  function refreshPower() {
+    const pct = computeAutoPower();
+    el.vPower.textContent = `${pct}%`;
+    el.powerBarFill.style.width = `${pct}%`;
+    return pct;
+  }
+  [el.skin, el.target, el.safety, el.session].forEach((input) => {
+    input.addEventListener("input", refreshPower);
+    input.addEventListener("change", refreshPower);
+  });
+  refreshPower();
 
   async function checkMockEnabled() {
     try {
@@ -337,7 +372,7 @@
       skin_temp_c: parseFloat(el.skin.value),
       heater_temp_c: parseFloat(el.heater.value),
       target_temp_c: parseFloat(el.target.value),
-      heater_power_pct: parseFloat(el.power.value),
+      heater_power_pct: refreshPower(),
       heart_rate_bpm: parseFloat(el.hr.value),
       safety_state: el.safety.value,
       session_state: el.session.value,
@@ -405,23 +440,24 @@
     if (name === "normal") {
       el.safety.value = "NORMAL"; el.session.value = "RUNNING";
       el.skin.value = 37.5; el.heater.value = 38.2; el.target.value = 39.0;
-      el.power.value = 55; el.hr.value = 66; el.judgement.value = "깨어있음";
+      el.hr.value = 66; el.judgement.value = "깨어있음";
       el.sleepmin.value = 0;
     } else if (name === "sleep") {
       el.safety.value = "NORMAL"; el.session.value = "COOLDOWN";
       el.skin.value = 39.0; el.heater.value = 39.4; el.target.value = 39.0;
-      el.power.value = 30; el.hr.value = 58; el.judgement.value = "수면중";
+      el.hr.value = 58; el.judgement.value = "수면중";
       el.sleepmin.value = 5;
     } else if (name === "fault") {
       el.safety.value = "FAULT_OVERTEMP_SKIN"; el.session.value = "RUNNING";
-      el.skin.value = 43.0; el.heater.value = 44.5; el.power.value = 0;
+      el.skin.value = 43.0; el.heater.value = 44.5;
       el.judgement.value = "깨어있음";
     } else if (name === "idle") {
       el.safety.value = "NORMAL"; el.session.value = "IDLE";
-      el.power.value = 0; el.elapsed.value = 0; el.sleepmin.value = 0;
+      el.elapsed.value = 0; el.sleepmin.value = 0;
       el.judgement.value = "깨어있음";
     }
-    [el.skin, el.heater, el.target, el.power, el.hr].forEach((i) => i.dispatchEvent(new Event("input")));
+    [el.skin, el.heater, el.target, el.hr].forEach((i) => i.dispatchEvent(new Event("input")));
+    refreshPower();
     sendStatus(true);
   }
 

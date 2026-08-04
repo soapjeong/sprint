@@ -17,6 +17,7 @@ class AppState:
         self.websockets: set[WebSocket] = set()
         self.latest_status: Optional[dict] = None
         self.latest_result: Optional[dict] = None
+        self.results: list[dict] = []
         self.log_writer: Optional[SessionLogWriter] = None
         self.device: Optional[DeviceConnection] = None
 

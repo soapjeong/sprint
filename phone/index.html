@@ -148,7 +148,7 @@
   .btn-secondary { background: rgba(26,34,48,0.06); color: var(--text); width: 100%; margin-top: 10px; padding: 14px; font-size: 0.95rem; }
   .hidden { display: none !important; }
 
-  .slider-head, .chart-head {
+  .chart-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -156,25 +156,15 @@
     font-size: 0.9rem;
     color: var(--text-dim);
   }
-  #slider-value { color: var(--accent); font-weight: 800; font-size: 1.05rem; }
-  input[type="range"] {
-    width: 100%;
-    accent-color: var(--accent);
-    height: 34px;
-  }
-  .slider-range-labels {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.7rem;
-    color: var(--text-dim);
-    margin-top: -6px;
-  }
 
   .legend { display: flex; align-items: center; gap: 10px; font-size: 0.72rem; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
   .dot-skin { background: #ff6b6b; }
   .dot-target { background: #4e89ff; }
+  .dot-converged { background: #1f8f7f; }
+  .dot-searching { background: #b5790a; }
   canvas { width: 100%; display: block; }
+  #sol-empty { font-size: 0.85rem; color: var(--text-dim); text-align: center; padding: 20px 0; }
 
   h2 { font-size: 0.95rem; margin: 0 0 10px; color: var(--text-dim); }
   #result-text { font-size: 1rem; line-height: 1.5; margin: 0; }
@@ -226,19 +216,9 @@
   <section class="card">
     <div class="btn-row">
       <button id="btn-start" class="btn btn-primary">▶ 작동 시작</button>
-      <button id="btn-abort" class="btn btn-danger">■ 중단</button>
+      <button id="btn-abort" class="btn btn-danger" disabled>■ 중단</button>
     </div>
     <button id="btn-reset" class="btn btn-warn hidden">🔓 강제중단 해제 (r)</button>
-  </section>
-
-  <section class="card">
-    <div class="slider-head">
-      <span>수동 목표온도 설정</span>
-      <span id="slider-value">39.0℃</span>
-    </div>
-    <input type="range" id="temp-slider" min="37.5" max="40.5" step="0.1" value="39.0" />
-    <div class="slider-range-labels"><span>37.5℃</span><span>40.5℃</span></div>
-    <button id="btn-set-temp" class="btn btn-secondary">이 온도로 다음 세션 설정</button>
   </section>
 
   <section class="card">
@@ -253,6 +233,15 @@
     <h2>오늘의 결과</h2>
     <p id="result-text">아직 완료된 세션이 없습니다.</p>
   </section>
+
+  <section class="card">
+    <div class="chart-head">
+      <span>입면 잠복기(SOL) 변화</span>
+      <span class="legend"><span><i class="dot dot-converged"></i>수렴됨</span><span><i class="dot dot-searching"></i>탐색중</span></span>
+    </div>
+    <canvas id="sol-chart" height="140"></canvas>
+    <p id="sol-empty">아직 완료된 세션이 없습니다.</p>
+  </section>
 </div>
 
 <div id="toast" class="toast hidden"></div>
@@ -261,8 +250,6 @@
 (function () {
   "use strict";
 
-  const SEARCH_MIN = 37.5;
-  const SEARCH_MAX = 40.5;
   const SESSION_MAX_SEC = 3600;
   const CHART_WINDOW_MS = 10 * 60 * 1000;
 
@@ -285,12 +272,11 @@
     btnStart: $("btn-start"),
     btnAbort: $("btn-abort"),
     btnReset: $("btn-reset"),
-    slider: $("temp-slider"),
-    sliderValue: $("slider-value"),
-    btnSetTemp: $("btn-set-temp"),
     chart: $("chart"),
     resultText: $("result-text"),
     toast: $("toast"),
+    solChart: $("sol-chart"),
+    solEmpty: $("sol-empty"),
   };
 
   const SESSION_LABELS = {
@@ -314,6 +300,7 @@
   let wsRetryDelay = 1000;
   let wsEverConnected = false;
   const chartBuffer = []; // {t: epoch ms, skin, target}
+  const solHistory = []; // {session_temp_c, sol_min, converged, next_temp_c}
 
   // -------------------------------------------------------------------
   // 토스트
@@ -382,7 +369,7 @@
 
   function handleMessage(msg) {
     if (msg.type === "status") applyStatus(msg.data);
-    else if (msg.type === "result") applyResult(msg.data);
+    else if (msg.type === "result") { applyResult(msg.data); pushSolHistory(msg.data); }
     else if (msg.type === "error") showToast(msg.message, true);
   }
 
@@ -417,6 +404,10 @@
     const session = s.session_state || "IDLE";
     el.sessionBadge.textContent = SESSION_LABELS[session] || session;
 
+    const isActive = session === "RUNNING" || session === "COOLDOWN";
+    el.btnStart.disabled = isActive;
+    el.btnAbort.disabled = !isActive;
+
     if (session === "RUNNING" && s.elapsed_sec !== null) {
       const remain = Math.max(0, SESSION_MAX_SEC - s.elapsed_sec);
       const mm = Math.floor(remain / 60).toString().padStart(2, "0");
@@ -440,6 +431,72 @@
     el.resultText.textContent =
       `오늘은 ${r.session_temp_c.toFixed(1)}℃에서 ${r.sol_min.toFixed(1)}분 만에 잠들었어요. ` +
       `${convergedTxt} 다음엔 ${r.next_temp_c.toFixed(1)}℃를 추천해요.`;
+  }
+
+  function pushSolHistory(r) {
+    solHistory.push(r);
+    if (solHistory.length > 50) solHistory.shift();
+    drawSolChart();
+  }
+
+  function seedSolHistory(list) {
+    solHistory.length = 0;
+    (list || []).slice(-50).forEach((r) => solHistory.push(r));
+    drawSolChart();
+  }
+
+  function drawSolChart() {
+    const canvas = el.solChart;
+    el.solEmpty.classList.toggle("hidden", solHistory.length > 0);
+    if (solHistory.length === 0) { canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height); return; }
+
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 320;
+    const cssHeight = 140;
+    canvas.width = cssWidth * dpr;
+    canvas.height = cssHeight * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    const sols = solHistory.map((r) => r.sol_min);
+    let vMax = Math.max(...sols, 5);
+    vMax *= 1.15;
+
+    const left = 10, right = 10, top = 10, bottom = 20;
+    const n = solHistory.length;
+    const stepX = n > 1 ? (cssWidth - left - right) / (n - 1) : 0;
+    const x = (i) => (n > 1 ? left + i * stepX : cssWidth / 2);
+    const y = (v) => top + (1 - v / vMax) * (cssHeight - top - bottom);
+
+    ctx.strokeStyle = "rgba(26,34,48,0.15)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(left, cssHeight - bottom);
+    ctx.lineTo(cssWidth - right, cssHeight - bottom);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(26,34,48,0.2)";
+    ctx.beginPath();
+    solHistory.forEach((r, i) => {
+      const px = x(i), py = y(r.sol_min);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.stroke();
+
+    solHistory.forEach((r, i) => {
+      const px = x(i), py = y(r.sol_min);
+      ctx.beginPath();
+      ctx.fillStyle = r.converged ? "#1f8f7f" : "#b5790a";
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.fillStyle = "#6b7686";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(`${n}회 세션`, cssWidth / 2, cssHeight - 5);
+    ctx.textAlign = "left";
   }
 
   // -------------------------------------------------------------------
@@ -531,16 +588,6 @@
   el.btnAbort.addEventListener("click", () => sendCommand("abort"));
   el.btnReset.addEventListener("click", () => sendCommand("r"));
 
-  el.slider.addEventListener("input", () => {
-    el.sliderValue.textContent = `${parseFloat(el.slider.value).toFixed(1)}℃`;
-  });
-  function sendSliderTemp() {
-    const v = Math.min(SEARCH_MAX, Math.max(SEARCH_MIN, parseFloat(el.slider.value)));
-    sendCommand(`set ${v.toFixed(1)}`);
-  }
-  el.slider.addEventListener("change", sendSliderTemp);
-  el.btnSetTemp.addEventListener("click", sendSliderTemp);
-
   // -------------------------------------------------------------------
   // 초기 상태 로드 (WebSocket 첫 메시지가 오기 전 화면 채우기 + 연결 표시)
   // -------------------------------------------------------------------
@@ -550,6 +597,7 @@
       const body = await res.json();
       if (body.status) applyStatus(body.status);
       if (body.last_result) applyResult(body.last_result);
+      if (body.results) seedSolHistory(body.results);
       el.connDot.classList.toggle("on", !!body.connected);
       el.connDot.classList.toggle("off", !body.connected);
     } catch (e) { /* WebSocket 재연결 루프가 배너를 처리하므로 여기선 무시 */ }
@@ -558,7 +606,9 @@
   pollStatusOnce();
   setInterval(pollStatusOnce, 5000);
   connectWS();
+  window.addEventListener("resize", drawSolChart);
   drawChart();
+  drawSolChart();
 })();
 </script>
 </body>
