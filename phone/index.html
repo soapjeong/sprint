@@ -4,244 +4,197 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>수면 온도 컨트롤</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://unpkg.com/@tabler/icons-webfont@2.47.0/tabler-icons.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   :root {
     color-scheme: light;
-    --bg: #f7f9fc;
-    --card: #ffffff;
-    --card-border: #e3e8ef;
-    --text: #1a2230;
-    --text-dim: #6b7686;
-    --accent: #3a6fe0;
-    --accent-dim: #e7edfb;
-    --ok: #1f8f7f;
-    --warn: #b5790a;
-    --danger: #d92d3f;
+    --surface-1: #f3efe6;
+    --surface-2: #ffffff;
+    --border: #e7e2d4;
+    --border-strong: #cdc6b2;
+    --text-primary: #2c2a24;
+    --text-secondary: #8a8579;
     --radius: 16px;
+    --bg-danger: #fbe9e7;
+    --text-danger: #c4483c;
+    --fill-danger: #c4483c;
+    --on-danger: #ffffff;
+    --bg-success: #e8f4ea;
+    --text-success: #35864c;
+    --chart-line: #e87ba4;
   }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-1: #161511;
+      --surface-2: #201f1a;
+      --border: #35332b;
+      --border-strong: #4a473c;
+      --text-primary: #f1efe6;
+      --text-secondary: #9a9689;
+      --bg-danger: #3a201d;
+      --text-danger: #f0857a;
+      --fill-danger: #c4483c;
+      --on-danger: #fff5f4;
+      --bg-success: #1c2f21;
+      --text-success: #7fce93;
+      --chart-line: #d55181;
+    }
+  }
+
   * { box-sizing: border-box; }
   html, body {
     margin: 0;
     padding: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font-family: "Jua", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
     -webkit-tap-highlight-color: transparent;
   }
   #app {
-    max-width: 480px;
+    max-width: 420px;
     margin: 0 auto;
-    padding: env(safe-area-inset-top, 12px) 14px calc(env(safe-area-inset-bottom, 12px) + 24px);
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
+    padding: calc(env(safe-area-inset-top, 16px) + 8px) 16px calc(env(safe-area-inset-bottom, 16px) + 24px);
   }
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 2px 4px;
-  }
-  header h1 {
-    font-size: 1.15rem;
-    margin: 0;
-    font-weight: 700;
-  }
-  #conn-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: var(--text-dim);
-    box-shadow: 0 0 0 4px rgba(26,34,48,0.05);
-    transition: background 0.3s;
-  }
-  #conn-dot.on { background: var(--ok); }
-  #conn-dot.off { background: var(--danger); }
-
-  .banner {
-    border-radius: var(--radius);
-    padding: 12px 14px;
-    font-weight: 600;
-    font-size: 0.95rem;
-    animation: pulse 1.4s ease-in-out infinite;
-  }
-  .banner.hidden { display: none; }
-  .banner-warn { background: rgba(247,183,51,0.15); color: var(--warn); border: 1px solid rgba(247,183,51,0.4); }
-  .banner-fault { background: rgba(217,45,63,0.1); color: #a91f30; border: 1px solid rgba(217,45,63,0.4); }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
+  #card {
+    background: var(--surface-2);
+    border-radius: 24px;
+    border: 0.5px solid var(--border);
+    padding: 24px 20px;
   }
 
-  .card {
-    background: var(--card);
-    border: 1px solid var(--card-border);
-    border-radius: var(--radius);
-    padding: 16px;
-  }
+  .center { text-align: center; }
+  #app-date { font-size: 13px; color: var(--text-secondary); margin: 0; }
+  #app-prompt { font-size: 16px; font-weight: 500; margin: 4px 0 0; min-height: 22px; }
+  #app-sub { font-size: 12.5px; color: var(--text-secondary); margin: 4px 0 0; min-height: 16px; }
 
-  .badges { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-  .badge {
-    display: inline-block;
-    padding: 5px 12px;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    font-weight: 700;
-    background: var(--accent-dim);
-    color: var(--accent);
+  .toggle-wrap { display: flex; flex-direction: column; align-items: center; margin: 24px 0; }
+  #toggle-btn {
+    width: 104px; height: 104px; border-radius: 50%; border: none;
+    background: var(--bg-danger);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: background 0.2s, transform 0.08s ease;
   }
-  .badge-ok { background: rgba(42,157,143,0.18); color: var(--ok); }
-  .badge-fault { background: rgba(217,45,63,0.14); color: #a91f30; }
+  #toggle-btn:active { transform: scale(0.96); }
+  #toggle-btn.on { background: var(--fill-danger); }
+  #toggle-icon { font-size: 38px; color: var(--text-danger); }
+  #toggle-btn.on #toggle-icon { color: var(--on-danger); }
+  #toggle-label { margin: 12px 0 0; font-size: 15px; font-weight: 500; }
 
-  .metrics {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
-  .metric {
-    background: rgba(58,111,224,0.05);
-    border-radius: 12px;
-    padding: 10px 12px;
-    display: flex;
-    flex-direction: column;
-  }
-  .metric-value {
-    font-size: 1.7rem;
-    font-weight: 800;
-    line-height: 1.2;
-    font-variant-numeric: tabular-nums;
-  }
-  .metric-label {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    margin-top: 2px;
-  }
-
-  #countdown-row {
-    margin-top: 12px;
-    text-align: center;
-    font-size: 0.85rem;
-    color: var(--text-dim);
-  }
-  #countdown-row.hidden { display: none; }
-  #countdown { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
-
-  .btn-row { display: flex; gap: 10px; }
-  .btn {
-    flex: 1;
-    border: none;
-    border-radius: 14px;
-    padding: 18px 10px;
-    font-size: 1.05rem;
-    font-weight: 800;
-    color: white;
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .tile { background: var(--surface-1); border-radius: var(--radius); padding: 14px; }
+  .tile-label { font-size: 12px; color: var(--text-secondary); margin: 0 0 8px; }
+  .stepper { display: flex; align-items: center; justify-content: space-between; }
+  .step-btn {
+    width: 26px; height: 26px; border-radius: 50%; border: 0.5px solid var(--border-strong);
+    background: transparent; color: var(--text-primary); font-size: 15px; line-height: 1; padding: 0;
     cursor: pointer;
-    -webkit-user-select: none;
-    user-select: none;
-    transition: transform 0.08s ease, opacity 0.2s;
   }
-  .btn:active { transform: scale(0.97); }
-  .btn:disabled { opacity: 0.4; }
-  .btn-primary { background: linear-gradient(135deg, #4e89ff, #3a6fe0); }
-  .btn-danger { background: linear-gradient(135deg, #e63946, #c62f3b); }
-  .btn-warn { background: linear-gradient(135deg, #f7b733, #e0a02a); width: 100%; margin-top: 10px; color: #1a1200; }
-  .btn-secondary { background: rgba(26,34,48,0.06); color: var(--text); width: 100%; margin-top: 10px; padding: 14px; font-size: 0.95rem; }
-  .hidden { display: none !important; }
+  .step-btn:disabled { opacity: 0.35; cursor: default; }
+  #target-val { font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  #skin-caption { font-size: 11px; color: var(--text-secondary); margin: 6px 0 0; }
+  #status-pill {
+    align-self: flex-start; display: inline-block; font-size: 13px; font-weight: 500;
+    padding: 4px 10px; border-radius: 999px; background: var(--surface-2); color: var(--text-secondary);
+  }
+  .tile-fill { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
 
-  .chart-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-    font-size: 0.9rem;
-    color: var(--text-dim);
+  h2 { font-size: 14px; font-weight: 500; margin: 0 0 10px; color: var(--text-primary); }
+
+  #insight {
+    border-radius: var(--radius); padding: 12px 14px; display: flex; align-items: flex-start; gap: 10px;
+    margin-bottom: 22px; background: var(--surface-1);
+  }
+  #insight.success { background: var(--bg-success); }
+  #insight.fault { background: var(--bg-danger); }
+  #insight-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; color: var(--text-secondary); }
+  #insight.success #insight-icon { color: var(--text-success); }
+  #insight.fault #insight-icon { color: var(--text-danger); }
+  #insight-text { margin: 0; font-size: 13px; font-weight: 500; color: var(--text-secondary); line-height: 1.5; }
+  #insight.success #insight-text { color: var(--text-success); }
+  #insight.fault #insight-text { color: var(--text-danger); }
+  #fault-clear {
+    display: inline; margin-left: 6px; font-size: 12.5px; font-weight: 700; text-decoration: underline;
+    background: none; border: none; padding: 0; cursor: pointer; color: inherit;
   }
 
-  .legend { display: flex; align-items: center; gap: 10px; font-size: 0.72rem; }
+  #sol-wrap { position: relative; height: 170px; margin-bottom: 4px; }
+  #sol-empty { font-size: 13px; color: var(--text-secondary); text-align: center; padding: 60px 0; }
+  #sol-empty.hidden { display: none; }
+
+  .divider { height: 0.5px; background: var(--border); margin: 22px 0; border: none; }
+  .legend { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--text-secondary); }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
-  .dot-skin { background: #ff6b6b; }
-  .dot-target { background: #4e89ff; }
-  .dot-converged { background: #1f8f7f; }
-  .dot-searching { background: #b5790a; }
+  .dot-skin { background: #e0796f; }
+  .dot-target { background: #7a93c9; }
+  .chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
   canvas { width: 100%; display: block; }
-  #sol-empty { font-size: 0.85rem; color: var(--text-dim); text-align: center; padding: 20px 0; }
-
-  h2 { font-size: 0.95rem; margin: 0 0 10px; color: var(--text-dim); }
-  #result-text { font-size: 1rem; line-height: 1.5; margin: 0; }
 
   .toast {
-    position: fixed;
-    left: 50%;
-    bottom: 24px;
-    transform: translateX(-50%);
-    background: #1a2230;
-    border: 1px solid rgba(255,255,255,0.1);
-    color: #f2f5fa;
-    padding: 10px 16px;
-    border-radius: 999px;
-    font-size: 0.85rem;
-    z-index: 50;
-    max-width: 90vw;
-    text-align: center;
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: #2c2a24; border: 1px solid rgba(255,255,255,0.12); color: #f5f2e9;
+    padding: 10px 16px; border-radius: 999px; font-size: 13px; z-index: 50; max-width: 90vw; text-align: center;
   }
-  .toast.error { color: #ff9aa4; border-color: rgba(217,45,63,0.5); }
+  .toast.error { color: #f0857a; border-color: rgba(196,72,60,0.5); }
   .toast.hidden { display: none; }
 </style>
 </head>
 <body>
 <div id="app">
-  <header>
-    <h1>🌙 수면 온도 컨트롤</h1>
-    <div id="conn-dot" title="서버 연결 상태"></div>
-  </header>
-
-  <div id="ws-banner" class="banner banner-warn hidden">⚠️ 서버와 연결이 끊겼습니다. 재연결 시도 중...</div>
-  <div id="fault-banner" class="banner banner-fault hidden">🚨 안전 경고: <span id="fault-text"></span> — 히터가 강제로 꺼졌습니다.</div>
-
-  <section class="card">
-    <div class="badges">
-      <span id="safety-badge" class="badge badge-ok">정상</span>
-      <span id="session-badge" class="badge">작동 전</span>
+  <div id="card">
+    <div class="center">
+      <p id="app-date"></p>
+      <p id="app-prompt">잠들기 전, 히터를 켜보세요</p>
+      <p id="app-sub"></p>
     </div>
-    <div class="metrics">
-      <div class="metric"><span class="metric-value" id="m-skin">--</span><span class="metric-label">피부온도 (℃)</span></div>
-      <div class="metric"><span class="metric-value" id="m-heater">--</span><span class="metric-label">히터온도 (℃)</span></div>
-      <div class="metric"><span class="metric-value" id="m-target">--</span><span class="metric-label">목표온도 (℃)</span></div>
-      <div class="metric"><span class="metric-value" id="m-power">--</span><span class="metric-label">히터파워 (%)</span></div>
-      <div class="metric"><span class="metric-value" id="m-hr">--</span><span class="metric-label">심박수 (BPM)</span></div>
-    </div>
-    <div id="countdown-row" class="hidden">⏱ 세션 자동 종료(60분)까지 <span id="countdown">--:--</span></div>
-  </section>
 
-  <section class="card">
-    <div class="btn-row">
-      <button id="btn-start" class="btn btn-primary">▶ 작동 시작</button>
-      <button id="btn-abort" class="btn btn-danger" disabled>■ 중단</button>
+    <div class="toggle-wrap">
+      <button id="toggle-btn" aria-label="히터 작동 시작">
+        <i id="toggle-icon" class="ti ti-player-play" aria-hidden="true"></i>
+      </button>
+      <p id="toggle-label">작동 시작</p>
     </div>
-    <button id="btn-reset" class="btn btn-warn hidden">🔓 강제중단 해제 (r)</button>
-  </section>
 
-  <section class="card">
+    <div class="grid2">
+      <div class="tile">
+        <p class="tile-label"><i class="ti ti-temperature" style="font-size:14px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>오늘의 목표 온도</p>
+        <div class="stepper">
+          <button id="target-down" class="step-btn" aria-label="온도 낮추기">−</button>
+          <span id="target-val">39.0°C</span>
+          <button id="target-up" class="step-btn" aria-label="온도 높이기">+</button>
+        </div>
+        <p id="skin-caption">현재 피부온도 --</p>
+      </div>
+      <div class="tile tile-fill">
+        <p class="tile-label">히터 상태</p>
+        <span id="status-pill">작동 안함</span>
+      </div>
+    </div>
+
+    <h2>오늘의 결과</h2>
+    <div id="insight">
+      <i id="insight-icon" class="ti ti-moon" aria-hidden="true"></i>
+      <p id="insight-text">아직 완료된 세션이 없어요.</p>
+      <button id="fault-clear" class="hidden">지금 해제하기</button>
+    </div>
+
+    <p style="font-size:14px; font-weight:500; margin:0 0 10px;">최근 7일, 잠드는 데 걸린 시간</p>
+    <div id="sol-wrap">
+      <canvas id="sol-chart"></canvas>
+      <p id="sol-empty">아직 쌓인 기록이 없어요.</p>
+    </div>
+
+    <hr class="divider" />
+
     <div class="chart-head">
-      <span>최근 10분 추이</span>
+      <span style="font-size:14px; font-weight:500;">최근 10분 온도 추이</span>
       <span class="legend"><span><i class="dot dot-skin"></i>피부온도</span><span><i class="dot dot-target"></i>목표온도</span></span>
     </div>
-    <canvas id="chart" height="150"></canvas>
-  </section>
-
-  <section class="card">
-    <h2>오늘의 결과</h2>
-    <p id="result-text">아직 완료된 세션이 없습니다.</p>
-  </section>
-
-  <section class="card">
-    <div class="chart-head">
-      <span>입면 잠복기(SOL) 변화</span>
-      <span class="legend"><span><i class="dot dot-converged"></i>수렴됨</span><span><i class="dot dot-searching"></i>탐색중</span></span>
-    </div>
-    <canvas id="sol-chart" height="140"></canvas>
-    <p id="sol-empty">아직 완료된 세션이 없습니다.</p>
-  </section>
+    <canvas id="chart" height="140"></canvas>
+  </div>
 </div>
 
 <div id="toast" class="toast hidden"></div>
@@ -250,41 +203,37 @@
 (function () {
   "use strict";
 
+  const SEARCH_MIN = 37.5;
+  const SEARCH_MAX = 40.5;
+  const TEMP_STEP = 0.5;
   const SESSION_MAX_SEC = 3600;
   const CHART_WINDOW_MS = 10 * 60 * 1000;
   const STABILIZE_SEC = 10; // 세션 시작 후 이 시간 동안은 센서가 안정화 중이라 그래프에서 제외
+  const WEEKDAY_KR = ["일", "월", "화", "수", "목", "금", "토"];
 
   const $ = (id) => document.getElementById(id);
 
   const el = {
-    connDot: $("conn-dot"),
-    wsBanner: $("ws-banner"),
-    faultBanner: $("fault-banner"),
-    faultText: $("fault-text"),
-    safetyBadge: $("safety-badge"),
-    sessionBadge: $("session-badge"),
-    skin: $("m-skin"),
-    heater: $("m-heater"),
-    target: $("m-target"),
-    power: $("m-power"),
-    hr: $("m-hr"),
-    countdownRow: $("countdown-row"),
-    countdown: $("countdown"),
-    btnStart: $("btn-start"),
-    btnAbort: $("btn-abort"),
-    btnReset: $("btn-reset"),
-    chart: $("chart"),
-    resultText: $("result-text"),
-    toast: $("toast"),
+    date: $("app-date"),
+    prompt: $("app-prompt"),
+    sub: $("app-sub"),
+    toggleBtn: $("toggle-btn"),
+    toggleIcon: $("toggle-icon"),
+    toggleLabel: $("toggle-label"),
+    targetVal: $("target-val"),
+    targetDown: $("target-down"),
+    targetUp: $("target-up"),
+    skinCaption: $("skin-caption"),
+    statusPill: $("status-pill"),
+    insight: $("insight"),
+    insightIcon: $("insight-icon"),
+    insightText: $("insight-text"),
+    faultClear: $("fault-clear"),
+    solWrap: $("sol-wrap"),
     solChart: $("sol-chart"),
     solEmpty: $("sol-empty"),
-  };
-
-  const SESSION_LABELS = {
-    IDLE: "작동 전",
-    RUNNING: "가열중",
-    COOLDOWN: "수면 진입 (온도 유지중)",
-    DONE: "세션 종료",
+    chart: $("chart"),
+    toast: $("toast"),
   };
 
   const SAFETY_LABELS = {
@@ -298,11 +247,23 @@
 
   let lastSafety = null;
   let lastSessionActive = false;
+  let wsEverConnected = false;
+  let wsConnected = false;
   let ws = null;
   let wsRetryDelay = 1000;
-  let wsEverConnected = false;
+  let currentSafety = "NORMAL";
+  let currentResult = null;
+  let displayedTarget = 39.0;
   const chartBuffer = []; // {t: epoch ms, skin, target}
-  const solHistory = []; // {session_temp_c, sol_min, converged, next_temp_c}
+  const solHistory = []; // {ts, session_temp_c, sol_min, converged, next_temp_c}
+
+  // -------------------------------------------------------------------
+  // 헤더 날짜
+  // -------------------------------------------------------------------
+  (function renderDate() {
+    const d = new Date();
+    el.date.textContent = `${d.getMonth() + 1}월 ${d.getDate()}일 ${WEEKDAY_KR[d.getDay()]}요일`;
+  })();
 
   // -------------------------------------------------------------------
   // 토스트
@@ -317,7 +278,8 @@
   }
 
   // -------------------------------------------------------------------
-  // 경고음 / 진동 (FAULT 진입, WebSocket 끊김 시)
+  // 경고음 / 진동 (FAULT 진입, WebSocket 끊김 시) — 화면 UI는 간소화했지만
+  // 이 알림만은 그대로 유지한다 (앱이 백그라운드에 있어도 놓치지 않기 위해).
   // -------------------------------------------------------------------
   function alertLoud() {
     if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]);
@@ -339,7 +301,7 @@
 
   // -------------------------------------------------------------------
   // 그래프용 이상치(노이즈) 필터 — 중앙값 필터로 튀는 값 하나를 흡수한다.
-  // 큰 숫자 카드는 이 필터를 거치지 않고 원본 값을 그대로 보여준다.
+  // 캡션의 실제 피부온도는 이 필터를 거치지 않고 원본 값을 그대로 보여준다.
   // -------------------------------------------------------------------
   let skinNoiseBuf = [];
   function resetSkinNoiseFilter() { skinNoiseBuf = []; }
@@ -364,9 +326,8 @@
     ws.onopen = () => {
       wsRetryDelay = 1000;
       wsEverConnected = true;
-      el.wsBanner.classList.add("hidden");
-      el.connDot.classList.add("on");
-      el.connDot.classList.remove("off");
+      wsConnected = true;
+      renderPrompt();
     };
     ws.onmessage = (ev) => {
       let msg;
@@ -374,10 +335,9 @@
       handleMessage(msg);
     };
     ws.onclose = () => {
-      el.connDot.classList.remove("on");
-      el.connDot.classList.add("off");
+      wsConnected = false;
       if (wsEverConnected) {
-        el.wsBanner.classList.remove("hidden");
+        renderPrompt();
         alertLoud();
       }
       setTimeout(connectWS, wsRetryDelay);
@@ -393,64 +353,101 @@
   }
 
   // -------------------------------------------------------------------
-  // 상태 반영
+  // 상단 안내 문구 — 연결 끊김 / 안정화 / 진행 상태를 배너 대신 이 한 줄로 표시한다.
   // -------------------------------------------------------------------
-  function fmt(v, digits) {
-    return v === null || v === undefined || Number.isNaN(v) ? "--" : v.toFixed(digits === undefined ? 1 : digits);
+  let lastSession = "IDLE";
+  let lastSessionElapsed = null;
+
+  function renderPrompt() {
+    if (!wsConnected && wsEverConnected) {
+      el.prompt.textContent = "🔌 연결이 끊겼어요. 재연결 중...";
+      el.sub.textContent = "";
+      return;
+    }
+    if (currentSafety && currentSafety !== "NORMAL") {
+      el.prompt.textContent = "안전 문제로 히터가 멈췄어요";
+      el.sub.textContent = "";
+      return;
+    }
+    if (lastSession === "RUNNING") {
+      const stabilizing = lastSessionElapsed !== null && lastSessionElapsed < STABILIZE_SEC;
+      el.prompt.textContent = stabilizing ? "센서를 안정화하고 있어요..." : "곧 잠들 준비를 하고 있어요";
+      if (!stabilizing && lastSessionElapsed !== null) {
+        const remain = Math.max(0, SESSION_MAX_SEC - lastSessionElapsed);
+        const mm = Math.floor(remain / 60).toString().padStart(2, "0");
+        const ss = Math.floor(remain % 60).toString().padStart(2, "0");
+        el.sub.textContent = `⏱ ${mm}:${ss} 후 자동 종료`;
+      } else {
+        el.sub.textContent = "";
+      }
+      return;
+    }
+    if (lastSession === "COOLDOWN") {
+      el.prompt.textContent = "온도를 유지하며 잠을 도와주고 있어요";
+      el.sub.textContent = "";
+      return;
+    }
+    el.prompt.textContent = "잠들기 전, 히터를 켜보세요";
+    el.sub.textContent = "";
   }
 
+  // -------------------------------------------------------------------
+  // 상태 반영
+  // -------------------------------------------------------------------
   function applyStatus(s) {
-    el.skin.textContent = fmt(s.skin_temp_c);
-    el.heater.textContent = fmt(s.heater_temp_c);
-    el.target.textContent = fmt(s.target_temp_c);
-    el.power.textContent = fmt(s.heater_power_pct, 0);
-    el.hr.textContent = fmt(s.heart_rate_bpm, 0);
-
     const safety = s.safety_state || "NORMAL";
     const isFault = safety !== "NORMAL";
-    el.safetyBadge.textContent = SAFETY_LABELS[safety] || safety;
-    el.safetyBadge.classList.toggle("badge-ok", !isFault);
-    el.safetyBadge.classList.toggle("badge-fault", isFault);
-    el.faultBanner.classList.toggle("hidden", !isFault);
-    el.faultText.textContent = SAFETY_LABELS[safety] || safety;
-    el.btnReset.classList.toggle("hidden", !isFault);
-
+    currentSafety = safety;
     if (safety !== lastSafety) {
       if (isFault) alertLoud();
       lastSafety = safety;
     }
 
     const session = s.session_state || "IDLE";
-    el.sessionBadge.textContent = SESSION_LABELS[session] || session;
-
     const isActive = session === "RUNNING" || session === "COOLDOWN";
-    el.btnStart.disabled = isActive;
-    el.btnAbort.disabled = !isActive;
+    lastSession = session;
+    lastSessionElapsed = s.session_elapsed_sec === undefined ? null : s.session_elapsed_sec;
 
     if (isActive !== lastSessionActive) {
       resetSkinNoiseFilter();
       lastSessionActive = isActive;
     }
 
-    const sessionElapsed = s.session_elapsed_sec; // 세션이 실제로 시작된 시점 기준 (백엔드가 계산, ESP32 부팅 이후 시간이 아님)
+    // 토글 버튼
+    el.toggleBtn.classList.toggle("on", isActive);
+    el.toggleIcon.className = isActive ? "ti ti-player-stop" : "ti ti-player-play";
+    el.toggleLabel.textContent = isActive ? "작동 중단" : "작동 시작";
+    el.toggleBtn.setAttribute("aria-label", isActive ? "히터 작동 중단" : "히터 작동 시작");
 
-    if (session === "RUNNING" && sessionElapsed !== null && sessionElapsed !== undefined) {
-      const remain = Math.max(0, SESSION_MAX_SEC - sessionElapsed);
-      const mm = Math.floor(remain / 60).toString().padStart(2, "0");
-      const ss = Math.floor(remain % 60).toString().padStart(2, "0");
-      el.countdown.textContent = `${mm}:${ss}`;
-      el.countdownRow.classList.remove("hidden");
+    // 히터 상태 pill — FAULT면 안전상태를, 아니면 세션 활성 여부를 보여준다.
+    if (isFault) {
+      el.statusPill.textContent = SAFETY_LABELS[safety] || safety;
+      el.statusPill.style.background = "var(--bg-danger)";
+      el.statusPill.style.color = "var(--text-danger)";
+    } else if (isActive) {
+      el.statusPill.textContent = "작동 중";
+      el.statusPill.style.background = "var(--bg-success)";
+      el.statusPill.style.color = "var(--text-success)";
     } else {
-      el.countdownRow.classList.add("hidden");
+      el.statusPill.textContent = "작동 안함";
+      el.statusPill.style.background = "var(--surface-2)";
+      el.statusPill.style.color = "var(--text-secondary)";
     }
 
-    // 세션 시작 직후 STABILIZE_SEC 동안은 센서가 안정화되는 구간이라 그래프에서 제외한다
-    // (큰 숫자 카드는 그대로 실시간으로 보여준다).
-    const isStabilizing =
-      (session === "RUNNING" || session === "COOLDOWN") &&
-      sessionElapsed !== null && sessionElapsed !== undefined &&
-      sessionElapsed < STABILIZE_SEC;
+    // 목표온도 (사용자가 방금 스테퍼를 누른 게 아니면 서버 값을 그대로 반영)
+    if (s.target_temp_c !== null && s.target_temp_c !== undefined) {
+      renderTarget(s.target_temp_c);
+    }
+    el.skinCaption.textContent =
+      s.skin_temp_c === null || s.skin_temp_c === undefined
+        ? "현재 피부온도 --"
+        : `현재 피부온도 ${s.skin_temp_c.toFixed(1)}℃`;
 
+    renderPrompt();
+    renderInsight();
+
+    // 세션 시작 직후 STABILIZE_SEC 동안은 센서가 안정화되는 구간이라 그래프에서 제외한다.
+    const isStabilizing = isActive && lastSessionElapsed !== null && lastSessionElapsed < STABILIZE_SEC;
     if (!isStabilizing) {
       chartBuffer.push({ t: Date.now(), skin: filteredSkin(s.skin_temp_c), target: s.target_temp_c });
       const cutoff = Date.now() - CHART_WINDOW_MS;
@@ -460,12 +457,142 @@
   }
 
   function applyResult(r) {
-    const convergedTxt = r.converged
-      ? "탐색이 수렴해서 이 온도가 최적으로 확정됐어요."
-      : "아직 탐색 중이에요.";
-    el.resultText.textContent =
-      `오늘은 ${r.session_temp_c.toFixed(1)}℃에서 ${r.sol_min.toFixed(1)}분 만에 잠들었어요. ` +
-      `${convergedTxt} 다음엔 ${r.next_temp_c.toFixed(1)}℃를 추천해요.`;
+    currentResult = r;
+    renderInsight();
+  }
+
+  function renderInsight() {
+    if (currentSafety && currentSafety !== "NORMAL") {
+      el.insight.className = "fault";
+      el.insightIcon.className = "ti ti-alert-triangle";
+      el.insightText.textContent = `안전 정지: ${SAFETY_LABELS[currentSafety] || currentSafety} — 히터가 꺼졌어요.`;
+      el.faultClear.classList.remove("hidden");
+      return;
+    }
+    el.faultClear.classList.add("hidden");
+    if (currentResult) {
+      const r = currentResult;
+      const convergedTxt = r.converged ? "탐색이 수렴했어요." : "아직 탐색 중이에요.";
+      el.insight.className = "success";
+      el.insightIcon.className = "ti ti-trending-down";
+      el.insightText.textContent =
+        `오늘은 ${r.session_temp_c.toFixed(1)}℃에서 ${r.sol_min.toFixed(1)}분 만에 잠들었어요. ` +
+        `${convergedTxt} 다음엔 ${r.next_temp_c.toFixed(1)}℃를 추천해요.`;
+      return;
+    }
+    el.insight.className = "";
+    el.insightIcon.className = "ti ti-moon";
+    el.insightText.textContent = "아직 완료된 세션이 없어요.";
+  }
+
+  el.faultClear.addEventListener("click", () => sendCommand("r"));
+
+  // -------------------------------------------------------------------
+  // 목표온도 스테퍼
+  // -------------------------------------------------------------------
+  function renderTarget(v) {
+    displayedTarget = v;
+    el.targetVal.textContent = `${v.toFixed(1)}°C`;
+  }
+  function adjustTarget(delta) {
+    const next = Math.min(SEARCH_MAX, Math.max(SEARCH_MIN, +(displayedTarget + delta).toFixed(1)));
+    renderTarget(next);
+    sendCommand(`set ${next.toFixed(1)}`);
+  }
+  el.targetDown.addEventListener("click", () => adjustTarget(-TEMP_STEP));
+  el.targetUp.addEventListener("click", () => adjustTarget(TEMP_STEP));
+
+  // -------------------------------------------------------------------
+  // 토글 버튼 (시작/중단 겸용)
+  // -------------------------------------------------------------------
+  el.toggleBtn.addEventListener("click", () => {
+    sendCommand(lastSessionActive ? "abort" : "start");
+  });
+
+  // -------------------------------------------------------------------
+  // 입면 잠복기(SOL) — 최근 7일, 요일별 (Chart.js)
+  // -------------------------------------------------------------------
+  let solChartInstance = null;
+
+  function bucketSolByDay(history) {
+    const byDate = {};
+    history.forEach((r) => {
+      const d = new Date(r.ts);
+      if (Number.isNaN(d.getTime())) return;
+      const key = d.toISOString().slice(0, 10);
+      byDate[key] = r.sol_min; // 하루에 여러 세션이면 마지막 세션이 대표값
+    });
+    const today = new Date();
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      days.push({ label: WEEKDAY_KR[d.getDay()], value: key in byDate ? byDate[key] : null });
+    }
+    return days;
+  }
+
+  function drawSolChart() {
+    const hasAny = solHistory.length > 0;
+    el.solEmpty.classList.toggle("hidden", hasAny);
+    el.solChart.classList.toggle("hidden", !hasAny);
+    if (!hasAny) return;
+
+    const days = bucketSolByDay(solHistory);
+    const values = days.map((d) => d.value);
+    const present = values.filter((v) => v !== null);
+    const minVal = present.length ? Math.min(...present) : null;
+
+    const isDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const lineColor = isDark ? "#d55181" : "#e87ba4";
+    const muted = "#898781";
+    const grid = isDark ? "#2c2c2a" : "#e1e0d9";
+    const dotColor = isDark ? "#4a4a47" : "#c3c2b7";
+    const ringColor = isDark ? "#1a1a19" : "#fcfcfb";
+
+    const pointColors = values.map((v) => (v !== null && v === minVal ? lineColor : dotColor));
+    const pointRadius = values.map((v) => (v !== null && v === minVal ? 6 : v === null ? 0 : 3));
+
+    if (solChartInstance) {
+      solChartInstance.data.labels = days.map((d) => d.label);
+      solChartInstance.data.datasets[0].data = values;
+      solChartInstance.data.datasets[0].pointBackgroundColor = pointColors;
+      solChartInstance.data.datasets[0].pointRadius = pointRadius;
+      solChartInstance.update();
+      return;
+    }
+
+    solChartInstance = new Chart(el.solChart, {
+      type: "line",
+      data: {
+        labels: days.map((d) => d.label),
+        datasets: [{
+          data: values,
+          borderColor: lineColor,
+          borderWidth: 2,
+          pointBackgroundColor: pointColors,
+          pointRadius: pointRadius,
+          pointBorderColor: ringColor,
+          pointBorderWidth: 2,
+          tension: 0.35,
+          fill: false,
+          spanGaps: true,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (c) => (c.parsed.y === null ? "기록 없음" : `${c.parsed.y}분`) } },
+        },
+        scales: {
+          y: { beginAtZero: true, ticks: { color: muted, font: { size: 11 } }, grid: { color: grid } },
+          x: { ticks: { color: muted, font: { size: 11 } }, grid: { display: false } },
+        },
+      },
+    });
   }
 
   function pushSolHistory(r) {
@@ -480,11 +607,11 @@
     drawSolChart();
   }
 
-  function drawSolChart() {
-    const canvas = el.solChart;
-    el.solEmpty.classList.toggle("hidden", solHistory.length > 0);
-    if (solHistory.length === 0) { canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height); return; }
-
+  // -------------------------------------------------------------------
+  // 최근 10분 온도 추이 (외부 라이브러리 없이 canvas로 직접 그림)
+  // -------------------------------------------------------------------
+  function drawChart() {
+    const canvas = el.chart;
     const dpr = window.devicePixelRatio || 1;
     const cssWidth = canvas.clientWidth || 320;
     const cssHeight = 140;
@@ -494,62 +621,8 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    const sols = solHistory.map((r) => r.sol_min);
-    let vMax = Math.max(...sols, 5);
-    vMax *= 1.15;
-
-    const left = 10, right = 10, top = 10, bottom = 20;
-    const n = solHistory.length;
-    const stepX = n > 1 ? (cssWidth - left - right) / (n - 1) : 0;
-    const x = (i) => (n > 1 ? left + i * stepX : cssWidth / 2);
-    const y = (v) => top + (1 - v / vMax) * (cssHeight - top - bottom);
-
-    ctx.strokeStyle = "rgba(26,34,48,0.15)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(left, cssHeight - bottom);
-    ctx.lineTo(cssWidth - right, cssHeight - bottom);
-    ctx.stroke();
-
-    ctx.strokeStyle = "rgba(26,34,48,0.2)";
-    ctx.beginPath();
-    solHistory.forEach((r, i) => {
-      const px = x(i), py = y(r.sol_min);
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    });
-    ctx.stroke();
-
-    solHistory.forEach((r, i) => {
-      const px = x(i), py = y(r.sol_min);
-      ctx.beginPath();
-      ctx.fillStyle = r.converged ? "#1f8f7f" : "#b5790a";
-      ctx.arc(px, py, 4, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    ctx.fillStyle = "#6b7686";
-    ctx.font = "11px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(`${n}회 세션`, cssWidth / 2, cssHeight - 5);
-    ctx.textAlign = "left";
-  }
-
-  // -------------------------------------------------------------------
-  // 미니 그래프 (외부 라이브러리 없이 canvas로 직접 그림)
-  // -------------------------------------------------------------------
-  function drawChart() {
-    const canvas = el.chart;
-    const dpr = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth || 320;
-    const cssHeight = 150;
-    canvas.width = cssWidth * dpr;
-    canvas.height = cssHeight * dpr;
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssWidth, cssHeight);
-
     if (chartBuffer.length < 2) {
-      ctx.fillStyle = "#4a5567";
+      ctx.fillStyle = "#9a9689";
       ctx.font = "13px sans-serif";
       ctx.fillText("데이터 수집 중...", 10, cssHeight / 2);
       return;
@@ -590,11 +663,12 @@
       ctx.setLineDash([]);
     }
 
-    drawSeries("target", "#4e89ff", true);
-    drawSeries("skin", "#ff6b6b", false);
+    drawSeries("target", "#7a93c9", true);
+    drawSeries("skin", "#e0796f", false);
   }
 
   window.addEventListener("resize", drawChart);
+  window.addEventListener("resize", drawSolChart);
 
   // -------------------------------------------------------------------
   // 명령 전송
@@ -619,12 +693,8 @@
     }
   }
 
-  el.btnStart.addEventListener("click", () => sendCommand("start"));
-  el.btnAbort.addEventListener("click", () => sendCommand("abort"));
-  el.btnReset.addEventListener("click", () => sendCommand("r"));
-
   // -------------------------------------------------------------------
-  // 초기 상태 로드 (WebSocket 첫 메시지가 오기 전 화면 채우기 + 연결 표시)
+  // 초기 상태 로드 (WebSocket 첫 메시지가 오기 전 화면 채우기)
   // -------------------------------------------------------------------
   async function pollStatusOnce() {
     try {
@@ -633,15 +703,14 @@
       if (body.status) applyStatus(body.status);
       if (body.last_result) applyResult(body.last_result);
       if (body.results) seedSolHistory(body.results);
-      el.connDot.classList.toggle("on", !!body.connected);
-      el.connDot.classList.toggle("off", !body.connected);
-    } catch (e) { /* WebSocket 재연결 루프가 배너를 처리하므로 여기선 무시 */ }
+    } catch (e) { /* WebSocket 재연결 루프가 안내 문구를 처리하므로 여기선 무시 */ }
   }
 
+  renderPrompt();
+  renderInsight();
   pollStatusOnce();
   setInterval(pollStatusOnce, 5000);
   connectWS();
-  window.addEventListener("resize", drawSolChart);
   drawChart();
   drawSolChart();
 })();

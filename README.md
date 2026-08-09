@@ -63,6 +63,10 @@ python run.py --serial-port COM5             # Windows
 폰 브라우저로 위 URL(`http://<LAN IP>:8000/`)에 접속하면 바로 컨트롤 페이지가 뜹니다.
 별도 서버를 띄울 필요 없이 백엔드가 정적 파일까지 서빙합니다.
 
+`phone/index.html`은 Google Fonts(Jua체), Tabler Icons, Chart.js를 CDN에서 불러옵니다 —
+백엔드 자체는 LAN만으로 동작하지만, 이 페이지를 열 때는 폰이 인터넷에 연결되어 있어야
+폰트/아이콘/그래프가 정상적으로 표시됩니다.
+
 ### 4. ESP32가 아직 없거나 연결이 안 될 때 — Mock 모드
 
 하드웨어 없이도 백엔드/폰 페이지를 전부 테스트할 수 있습니다.
