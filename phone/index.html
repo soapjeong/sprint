@@ -1,0 +1,848 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>수면 온도 컨트롤</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&family=Jua&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: oklch(0.97 0.018 15);
+    --card: oklch(0.995 0.008 15);
+    --card-border: oklch(0.9 0.03 15);
+    --text: oklch(0.35 0.03 20);
+    --text-dim: oklch(0.42 0.03 20);
+    --text-faint: oklch(0.46 0.03 20);
+    --cool: oklch(0.65 0.1 260);
+    --cool-bg: oklch(0.93 0.035 260);
+    --danger: oklch(0.55 0.18 25);
+    --danger-bg: oklch(0.92 0.06 25);
+    --danger-strong: oklch(0.5 0.14 25);
+
+    --accent: oklch(0.68 0.15 55);
+    --accent-bg: oklch(0.93 0.06 65);
+    --accent-soft: oklch(0.72 0.13 55);
+    --accent-soft2: oklch(0.75 0.14 50);
+    --accent-shadow: oklch(0.7 0.1 55 / 0.3);
+
+    --neutral-btn: oklch(0.9 0.015 20);
+    --neutral-btn-ring: oklch(0.94 0.015 20);
+    --neutral-dot: oklch(0.78 0.025 20);
+    --font-jua: "Jua", "Noto Sans KR", sans-serif;
+  }
+  * { box-sizing: border-box; font-family: "Noto Sans KR", -apple-system, BlinkMacSystemFont, sans-serif; font-weight: 600; }
+  body { margin: 0; background: var(--bg); color: var(--text); -webkit-tap-highlight-color: transparent; }
+  @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  #app {
+    max-width: 440px;
+    margin: 0 auto;
+    padding: calc(env(safe-area-inset-top, 24px) + 8px) 20px calc(env(safe-area-inset-bottom, 24px) + 20px);
+    display: flex; flex-direction: column; gap: 22px;
+  }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px; }
+  #app-title { font-size: 25px; font-weight: 800; font-family: var(--font-jua); }
+  #app-date { font-size: 14.5px; color: var(--text-faint); margin-top: 4px; }
+  #history-btn {
+    display: flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 999px; padding: 8px 12px; cursor: pointer; color: var(--text-dim); font-size: 14px; font-weight: 700;
+  }
+
+  #fault-banner {
+    background: var(--danger-bg); border: 1px solid var(--danger-strong); border-radius: 16px;
+    padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    animation: fadeIn 0.3s ease;
+  }
+  #fault-banner.hidden { display: none; }
+  #fault-banner span { font-size: 15px; font-weight: 700; color: oklch(0.4 0.14 25); }
+  #fault-clear-btn {
+    font-size: 14px; font-weight: 700; color: #fff; background: var(--danger-strong); border: none;
+    border-radius: 999px; padding: 7px 14px; cursor: pointer;
+  }
+
+  .card { background: var(--card); border: 1px solid var(--card-border); border-radius: 26px; padding: 28px; animation: fadeIn 0.4s ease; }
+  .section-label { font-size: 16px; font-weight: 700; color: var(--text-dim); margin: 0 0 18px; letter-spacing: 0.2px; }
+
+  .toggle-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 0 18px; }
+  #toggle-btn {
+    width: 132px; height: 132px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--neutral-btn); box-shadow: 0 0 0 8px var(--neutral-btn-ring);
+    display: flex; align-items: center; justify-content: center; transition: all 0.35s ease;
+  }
+  #toggle-btn.on { background: linear-gradient(160deg, var(--accent), var(--accent-soft2)); box-shadow: 0 0 0 8px var(--accent-bg), 0 8px 24px var(--accent-shadow); }
+  #toggle-btn.fault { opacity: 0.5; cursor: not-allowed; }
+  #toggle-label { font-size: 17.5px; font-weight: 700; font-family: var(--font-jua); margin-top: 6px; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 4px; }
+  .tile { border-radius: 20px; padding: 18px; }
+  .tile-label { font-size: 13.5px; color: var(--text-dim); font-weight: 600; margin-bottom: 8px; }
+  #target-tile { background: var(--cool-bg); }
+  #target-val-row { display: flex; align-items: baseline; gap: 4px; }
+  #target-val { font-size: 32px; font-weight: 800; font-family: var(--font-jua); }
+  #target-unit { font-size: 17px; font-weight: 700; color: var(--text-dim); }
+  #target-caption { font-size: 12.5px; color: var(--text-faint); margin-top: 6px; }
+  #status-tile-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  #status-dot { width: 8px; height: 8px; border-radius: 50%; }
+  #status-dot.hidden { display: none; }
+  #status-label { font-size: 18px; font-weight: 800; font-family: var(--font-jua); line-height: 1.35; }
+  #status-label div { white-space: nowrap; }
+
+  #control-sub { font-size: 14px; color: var(--text-dim); margin-top: 14px; text-align: center; line-height: 1.6; }
+  #control-sub2 { font-size: 12.5px; color: var(--text-faint); margin-top: 4px; text-align: center; }
+  #control-sub2.hidden { display: none; }
+
+  #result-card { background: linear-gradient(150deg, var(--card), oklch(0.94 0.04 30 / 0.6)); display: flex; align-items: center; gap: 14px; }
+  #result-icon-wrap { width: 60px; height: 60px; border-radius: 50%; background: var(--accent-bg); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  #result-icon-wrap.empty { background: var(--neutral-btn-ring); }
+  #result-main { font-size: 17px; line-height: 1.5; color: var(--text); }
+  #result-main strong { font-size: 26px; font-weight: 800; font-family: var(--font-jua); }
+  #result-sub { font-size: 14px; color: var(--text-dim); margin-top: 4px; }
+
+  #bars-row { display: flex; gap: 8px; align-items: flex-end; }
+  .bar-col { display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; flex: 1; }
+  .bar-sol { font-size: 13.5px; color: var(--text-faint); font-weight: 700; }
+  .bar-track { width: 26px; height: 100px; border-radius: 12px; background: oklch(0.93 0.015 20); display: flex; align-items: flex-end; overflow: hidden; border: 1.5px solid transparent; }
+  .bar-track.selected { border-color: var(--accent); }
+  .bar-fill { width: 100%; border-radius: 8px; background: var(--neutral-dot); }
+  .bar-fill.converged { background: linear-gradient(180deg, var(--accent), var(--accent-soft)); }
+  .bar-weekday { font-size: 13.5px; color: var(--text-dim); font-weight: 700; }
+  #bars-caption { font-size: 13px; color: var(--text-faint); margin-top: 18px; text-align: center; }
+
+  #history-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 50;
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  #history-overlay.hidden { display: none; }
+  #history-sheet {
+    width: 100%; max-width: 440px; background: var(--bg); border-radius: 24px 24px 0 0;
+    padding: 18px 20px 28px; max-height: 82%; overflow-y: auto; animation: fadeIn 0.25s ease;
+  }
+  #history-sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  #history-sheet-head h2 { font-size: 20px; font-weight: 800; color: var(--text); margin: 0; font-family: var(--font-jua); }
+  #history-close { background: none; border: none; padding: 6px; cursor: pointer; }
+  #history-month-label { font-size: 14.5px; color: var(--text-dim); margin: 2px 0 4px; }
+  #calendar-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; margin-top: 12px; }
+  .cal-weekday { text-align: center; font-size: 13px; color: var(--text-faint); font-weight: 700; padding: 2px 0; }
+  .cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 12px; font-size: 15px; font-weight: 700; gap: 2px; border: 1.5px solid transparent; }
+  .cal-cell.has-record { color: var(--text); cursor: pointer; }
+  .cal-cell.no-record { color: var(--text-faint); }
+  .cal-cell.selected { background: var(--accent-bg); border-color: var(--accent); }
+  .cal-dot { width: 4px; height: 4px; border-radius: 50%; }
+  .cal-dot.converged { background: var(--accent); }
+  .cal-dot.searching { background: var(--text-faint); }
+  #history-detail {
+    margin-top: 18px; padding: 16px; border-radius: 16px; background: var(--card); border: 1px solid var(--card-border);
+    display: none; flex-direction: column; gap: 8px;
+  }
+  #history-detail.show { display: flex; }
+  #hd-date { font-size: 15px; color: var(--text-dim); font-weight: 600; }
+  #hd-sol-row { display: flex; align-items: baseline; gap: 8px; }
+  #hd-sol { font-size: 30px; font-weight: 800; font-family: var(--font-jua); color: var(--text); }
+  #hd-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { font-size: 13.5px; font-weight: 700; padding: 5px 12px; border-radius: 999px; }
+  .pill-converged { background: var(--accent-bg); color: var(--accent); }
+  .pill-searching { background: oklch(0.93 0.015 20); color: var(--text-dim); }
+  .pill-neutral { background: oklch(0.93 0.015 20); color: var(--text-dim); }
+  #history-empty { font-size: 14px; color: var(--text-faint); text-align: center; padding: 30px 0; }
+  #history-empty.hidden { display: none; }
+
+  .divider { height: 0.5px; background: var(--card-border); margin: 0; border: none; }
+  .chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .legend { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--text-faint); font-weight: 600; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
+  .dot-skin { background: oklch(0.62 0.14 30); }
+  .dot-target { background: var(--cool); }
+  canvas { width: 100%; display: block; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: oklch(0.3 0.02 20); border: 1px solid oklch(1 0 0 / 0.12); color: oklch(0.97 0.01 20);
+    padding: 10px 16px; border-radius: 999px; font-size: 13px; z-index: 60; max-width: 90vw; text-align: center;
+  }
+  .toast.error { color: oklch(0.75 0.13 25); border-color: oklch(0.55 0.14 25 / 0.5); }
+  .toast.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div>
+      <div id="app-title">오늘 밤 수면 온도</div>
+      <div id="app-date"></div>
+    </div>
+    <button id="history-btn" aria-label="지난 기록 보기">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="3.5" y="5" width="17" height="15" rx="3" stroke="currentColor" stroke-width="1.8"/>
+        <line x1="3.5" y1="9.5" x2="20.5" y2="9.5" stroke="currentColor" stroke-width="1.8"/>
+        <line x1="8" y1="3" x2="8" y2="6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="16" y1="3" x2="16" y2="6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <span>기록</span>
+    </button>
+  </header>
+
+  <div id="fault-banner" class="hidden">
+    <span id="fault-banner-text">⚠ 안전 문제로 히터가 꺼졌어요</span>
+    <button id="fault-clear-btn">해제</button>
+  </div>
+
+  <div class="card">
+    <div class="toggle-wrap">
+      <button id="toggle-btn" aria-label="히터 작동 시작">
+        <svg id="power-icon" width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path id="power-icon-stem" d="M12 3v8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+          <path id="power-icon-arc" d="M7 5.5a8 8 0 1 0 10 0" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+        </svg>
+      </button>
+      <div id="toggle-label">눌러서 작동 시작</div>
+    </div>
+
+    <div class="grid2">
+      <div id="target-tile" class="tile">
+        <div class="tile-label">오늘의 목표 온도</div>
+        <div id="target-val-row">
+          <span id="target-val">--</span>
+          <span id="target-unit">℃</span>
+        </div>
+        <div id="target-caption">지난 기록으로 자동 설정돼요</div>
+      </div>
+      <div id="status-tile" class="tile">
+        <div id="status-tile-head">
+          <span id="status-dot" class="hidden"></span>
+          <span class="tile-label" style="margin-bottom:0;">히터 상태</span>
+        </div>
+        <div id="status-label">작동 안 함</div>
+      </div>
+    </div>
+
+    <div id="control-sub">잠들기 전, 시작을 눌러 히터를 켜세요</div>
+    <div id="control-sub2" class="hidden"></div>
+  </div>
+
+  <div id="result-card" class="card">
+    <div id="result-icon-wrap" class="empty">
+      <svg id="result-icon" width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M20 13.5A8.5 8.5 0 1 1 10.5 4a6.8 6.8 0 0 0 9.5 9.5Z" fill="currentColor"/>
+      </svg>
+    </div>
+    <div>
+      <div id="result-main">아직 완료된 세션이 없어요</div>
+      <div id="result-sub"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-label">요즘 잠드는 데 걸리는 시간</div>
+    <div id="bars-row"></div>
+    <div id="bars-caption">막대를 누르면 그날 기록을 볼 수 있어요</div>
+  </div>
+
+  <hr class="divider" />
+
+  <div>
+    <div class="chart-head">
+      <span style="font-size:14px; font-weight:700; color: var(--text-dim);">최근 10분 온도 추이</span>
+      <span class="legend"><span><i class="dot dot-skin"></i>피부온도</span><span><i class="dot dot-target"></i>목표온도</span></span>
+    </div>
+    <canvas id="chart" height="140"></canvas>
+  </div>
+</div>
+
+<div id="history-overlay" class="hidden">
+  <div id="history-sheet">
+    <div id="history-sheet-head">
+      <h2>지난 기록</h2>
+      <button id="history-close" aria-label="닫기">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+    <div id="history-month-label"></div>
+    <div id="calendar-grid"></div>
+    <p id="history-empty" class="hidden">아직 쌓인 기록이 없어요.</p>
+    <div id="history-detail">
+      <div id="hd-date"></div>
+      <div id="hd-sol-row">
+        <span id="hd-sol"></span>
+        <span style="font-size:15px; color: var(--text-dim);">만에 잠들었어요</span>
+      </div>
+      <div id="hd-pills"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  const SESSION_MAX_SEC = 3600;
+  const HOLD_SEC = 10 * 60; // 펌웨어 HEATING_DURATION_MS와 동일 (10분)
+  const CHART_WINDOW_MS = 10 * 60 * 1000;
+  const STABILIZE_SEC = 10; // 세션 시작 후 이 시간 동안은 센서가 안정화 중이라 그래프에서 제외
+  const WEEKDAY_KR = ["일", "월", "화", "수", "목", "금", "토"];
+
+  const $ = (id) => document.getElementById(id);
+
+  const el = {
+    appDate: $("app-date"),
+    historyBtn: $("history-btn"),
+    faultBanner: $("fault-banner"),
+    faultBannerText: $("fault-banner-text"),
+    faultClearBtn: $("fault-clear-btn"),
+    toggleBtn: $("toggle-btn"),
+    powerStem: $("power-icon-stem"),
+    powerArc: $("power-icon-arc"),
+    toggleLabel: $("toggle-label"),
+    targetVal: $("target-val"),
+    statusDot: $("status-dot"),
+    statusLabel: $("status-label"),
+    controlSub: $("control-sub"),
+    controlSub2: $("control-sub2"),
+    resultIconWrap: $("result-icon-wrap"),
+    resultMain: $("result-main"),
+    resultSub: $("result-sub"),
+    barsRow: $("bars-row"),
+    chart: $("chart"),
+    toast: $("toast"),
+    historyOverlay: $("history-overlay"),
+    historyClose: $("history-close"),
+    historyMonthLabel: $("history-month-label"),
+    calendarGrid: $("calendar-grid"),
+    historyEmpty: $("history-empty"),
+    historyDetail: $("history-detail"),
+    hdDate: $("hd-date"),
+    hdSol: $("hd-sol"),
+    hdPills: $("hd-pills"),
+  };
+
+  const SAFETY_LABELS = {
+    NORMAL: "정상",
+    FAULT_OVERTEMP_SKIN: "피부 과열 감지",
+    FAULT_OVERTEMP_HEATER: "히터 과열 감지",
+    FAULT_SPIKE_SKIN: "피부 온도 급상승 감지",
+    FAULT_SPIKE_HEATER: "히터 온도 급상승 감지",
+    FAULT_SENSOR: "센서 오류",
+  };
+
+  let currentSafety = "NORMAL";
+  let currentSession = "IDLE";
+  let currentSessionElapsed = null;
+  let currentTarget = null;
+  let currentResult = null;
+  let cooldownStartedAt = null;
+  let lastSafety = null;
+  let lastSessionActive = false;
+  let wsEverConnected = false;
+  let wsConnected = false;
+  let ws = null;
+  let wsRetryDelay = 1000;
+  let selectedHistoryDate = null;
+  const chartBuffer = []; // {t: epoch ms, skin, target}
+  const solHistory = []; // {ts, session_temp_c, sol_min, converged, next_temp_c}
+
+  // -------------------------------------------------------------------
+  // 헤더 날짜
+  // -------------------------------------------------------------------
+  (function renderDate() {
+    const d = new Date();
+    el.appDate.textContent = `${d.getMonth() + 1}월 ${d.getDate()}일 · ${WEEKDAY_KR[d.getDay()]}요일`;
+  })();
+
+  // -------------------------------------------------------------------
+  // 토스트
+  // -------------------------------------------------------------------
+  let toastTimer = null;
+  function showToast(msg, isError) {
+    el.toast.textContent = msg;
+    el.toast.classList.toggle("error", !!isError);
+    el.toast.classList.remove("hidden");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.toast.classList.add("hidden"), 2600);
+  }
+
+  // -------------------------------------------------------------------
+  // 경고음 / 진동 (FAULT 진입, WebSocket 끊김 시)
+  // -------------------------------------------------------------------
+  function alertLoud() {
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]);
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.5);
+    } catch (e) { /* 무음 환경 등 오디오 실패는 무시 */ }
+  }
+
+  // -------------------------------------------------------------------
+  // 그래프용 이상치(노이즈) 필터 — 중앙값 필터로 튀는 값 하나를 흡수한다.
+  // -------------------------------------------------------------------
+  let skinNoiseBuf = [];
+  function resetSkinNoiseFilter() { skinNoiseBuf = []; }
+  function medianOfThree(a, b, c) {
+    return Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+  }
+  function filteredSkin(raw) {
+    if (raw === null || raw === undefined) { resetSkinNoiseFilter(); return null; }
+    skinNoiseBuf.push(raw);
+    if (skinNoiseBuf.length > 3) skinNoiseBuf.shift();
+    if (skinNoiseBuf.length < 3) return raw;
+    return medianOfThree(skinNoiseBuf[0], skinNoiseBuf[1], skinNoiseBuf[2]);
+  }
+
+  // -------------------------------------------------------------------
+  // WebSocket
+  // -------------------------------------------------------------------
+  function connectWS() {
+    const proto = location.protocol === "https:" ? "wss://" : "ws://";
+    ws = new WebSocket(proto + location.host + "/ws/live");
+
+    ws.onopen = () => {
+      wsRetryDelay = 1000;
+      wsEverConnected = true;
+      wsConnected = true;
+      renderControlSub();
+    };
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      handleMessage(msg);
+    };
+    ws.onclose = () => {
+      wsConnected = false;
+      if (wsEverConnected) {
+        renderControlSub();
+        alertLoud();
+      }
+      setTimeout(connectWS, wsRetryDelay);
+      wsRetryDelay = Math.min(wsRetryDelay * 1.6, 10000);
+    };
+    ws.onerror = () => { try { ws.close(); } catch (e) {} };
+  }
+
+  function handleMessage(msg) {
+    if (msg.type === "status") applyStatus(msg.data);
+    else if (msg.type === "result") { applyResult(msg.data); pushSolHistory(msg.data); }
+    else if (msg.type === "error") showToast(msg.message, true);
+  }
+
+  // -------------------------------------------------------------------
+  // 상태 반영
+  // -------------------------------------------------------------------
+  function applyStatus(s) {
+    const safety = s.safety_state || "NORMAL";
+    const isFault = safety !== "NORMAL";
+    currentSafety = safety;
+    if (safety !== lastSafety) {
+      if (isFault) alertLoud();
+      lastSafety = safety;
+    }
+
+    const session = s.session_state || "IDLE";
+    const isActive = session === "RUNNING" || session === "COOLDOWN";
+    if (session === "COOLDOWN" && currentSession !== "COOLDOWN") cooldownStartedAt = Date.now();
+    if (session !== "COOLDOWN") cooldownStartedAt = null;
+    currentSession = session;
+    currentSessionElapsed = s.session_elapsed_sec === undefined ? null : s.session_elapsed_sec;
+
+    if (isActive !== lastSessionActive) {
+      resetSkinNoiseFilter();
+      lastSessionActive = isActive;
+    }
+
+    if (s.target_temp_c !== null && s.target_temp_c !== undefined) {
+      currentTarget = s.target_temp_c;
+    }
+
+    renderToggle(isActive, isFault);
+    renderStatusTile(session, isActive);
+    renderTargetTile();
+    renderFaultBanner(isFault, safety);
+    renderControlSub();
+
+    const isStabilizing = isActive && currentSessionElapsed !== null && currentSessionElapsed < STABILIZE_SEC;
+    if (!isStabilizing) {
+      chartBuffer.push({ t: Date.now(), skin: filteredSkin(s.skin_temp_c), target: s.target_temp_c });
+      const cutoff = Date.now() - CHART_WINDOW_MS;
+      while (chartBuffer.length && chartBuffer[0].t < cutoff) chartBuffer.shift();
+    }
+    drawChart();
+  }
+
+  function renderToggle(isActive, isFault) {
+    el.toggleBtn.classList.toggle("on", isActive);
+    el.toggleBtn.classList.toggle("fault", isFault);
+    el.toggleLabel.textContent = isActive ? "눌러서 중단" : "눌러서 작동 시작";
+    el.toggleBtn.setAttribute("aria-label", isActive ? "히터 작동 중단" : "히터 작동 시작");
+    const c = isActive ? "#fff" : "currentColor";
+    el.powerStem.setAttribute("stroke", c);
+    el.powerArc.setAttribute("stroke", c);
+  }
+
+  function renderStatusTile(session, isActive) {
+    el.statusDot.classList.toggle("hidden", !isActive);
+    let lines;
+    if (session === "RUNNING") { lines = ["작동 중", "가열 중"]; }
+    else if (session === "COOLDOWN") { lines = ["작동 중", "수면 유지"]; }
+    else { lines = ["작동 안 함"]; }
+    el.statusLabel.innerHTML = "";
+    lines.forEach((l) => {
+      const div = document.createElement("div");
+      div.textContent = l;
+      el.statusLabel.appendChild(div);
+    });
+    el.statusLabel.style.color = isActive ? "var(--accent)" : "var(--text-dim)";
+  }
+
+  function renderTargetTile() {
+    el.targetVal.textContent = currentTarget === null ? "--" : currentTarget.toFixed(1);
+  }
+
+  function renderFaultBanner(isFault, safety) {
+    el.faultBanner.classList.toggle("hidden", !isFault);
+    if (isFault) {
+      el.faultBannerText.textContent = `⚠ 안전 문제로 히터가 꺼졌어요 (${SAFETY_LABELS[safety] || safety})`;
+    }
+  }
+
+  function renderControlSub() {
+    if (!wsConnected && wsEverConnected) {
+      el.controlSub.textContent = "🔌 연결이 끊겼어요. 재연결 중...";
+      el.controlSub2.classList.add("hidden");
+      return;
+    }
+    if (currentSession === "RUNNING") {
+      el.controlSub.textContent = "체온에 맞춰 서서히 데우고 있어요";
+      if (currentSessionElapsed !== null) {
+        const remain = Math.max(0, SESSION_MAX_SEC - currentSessionElapsed);
+        const mm = Math.floor(remain / 60).toString().padStart(2, "0");
+        const ss = Math.floor(remain % 60).toString().padStart(2, "0");
+        el.controlSub2.textContent = `⏱ ${mm}:${ss} 후 자동 종료`;
+        el.controlSub2.classList.remove("hidden");
+      } else {
+        el.controlSub2.classList.add("hidden");
+      }
+      return;
+    }
+    if (currentSession === "COOLDOWN") {
+      const remainMin = cooldownStartedAt === null
+        ? Math.ceil(HOLD_SEC / 60)
+        : Math.max(0, Math.ceil((HOLD_SEC - (Date.now() - cooldownStartedAt) / 1000) / 60));
+      el.controlSub.textContent = `잠든 채로 ${remainMin}분 더 유지하면 자동으로 꺼져요`;
+      el.controlSub2.classList.add("hidden");
+      return;
+    }
+    el.controlSub.textContent = "잠들기 전, 시작을 눌러 히터를 켜세요";
+    el.controlSub2.classList.add("hidden");
+  }
+  setInterval(() => { if (currentSession === "COOLDOWN") renderControlSub(); }, 1000);
+
+  function applyResult(r) {
+    currentResult = r;
+    renderResultCard();
+  }
+
+  function renderResultCard() {
+    if (!currentResult) {
+      el.resultIconWrap.classList.add("empty");
+      el.resultMain.textContent = "아직 완료된 세션이 없어요";
+      el.resultSub.textContent = "";
+      return;
+    }
+    const r = currentResult;
+    el.resultIconWrap.classList.remove("empty");
+    el.resultMain.innerHTML = "";
+    const strong = document.createElement("strong");
+    strong.textContent = `${r.sol_min.toFixed(0)}분`;
+    el.resultMain.appendChild(strong);
+    el.resultMain.appendChild(document.createTextNode(" 만에 잠들었어요"));
+    el.resultSub.textContent = r.converged
+      ? `${r.session_temp_c.toFixed(1)}℃가 딱 맞는 온도로 확인됐어요`
+      : "아직 최적 온도를 찾는 중이에요";
+  }
+
+  el.faultClearBtn.addEventListener("click", () => sendCommand("r"));
+
+  // -------------------------------------------------------------------
+  // 토글 버튼 (시작/중단 겸용) — FAULT 중에는 비활성 (펌웨어가 이미 히터를
+  // 하드컷오프한 상태라, 리셋('해제')이 먼저 이뤄져야 다음 동작이 가능하다)
+  // -------------------------------------------------------------------
+  el.toggleBtn.addEventListener("click", () => {
+    if (currentSafety !== "NORMAL") return;
+    sendCommand(lastSessionActive ? "abort" : "start");
+  });
+
+  // -------------------------------------------------------------------
+  // 세션 결과 기록 — 날짜별 인덱스, 7일 막대그래프, 월간 기록 시트
+  // -------------------------------------------------------------------
+  function dayIndexFromHistory(history) {
+    const byDate = {};
+    history.forEach((r) => {
+      const d = new Date(r.ts);
+      if (Number.isNaN(d.getTime())) return;
+      const key = d.toISOString().slice(0, 10);
+      byDate[key] = r; // 하루에 여러 세션이면 마지막 세션이 대표 기록
+    });
+    return byDate;
+  }
+
+  function renderBars() {
+    const byDate = dayIndexFromHistory(solHistory);
+    const today = new Date();
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      days.push({ date: key, weekday: WEEKDAY_KR[d.getDay()], rec: byDate[key] || null });
+    }
+    const maxSol = Math.max(...days.map((d) => (d.rec ? d.rec.sol_min : 0)), 20);
+
+    el.barsRow.innerHTML = "";
+    days.forEach((d) => {
+      const col = document.createElement("div");
+      col.className = "bar-col";
+
+      const solLabel = document.createElement("span");
+      solLabel.className = "bar-sol";
+      solLabel.textContent = d.rec ? `${d.rec.sol_min.toFixed(0)}분` : "–";
+      col.appendChild(solLabel);
+
+      const track = document.createElement("div");
+      track.className = "bar-track";
+      const fill = document.createElement("div");
+      const barH = d.rec ? 10 + (d.rec.sol_min / maxSol) * 70 : 0;
+      fill.className = "bar-fill" + (d.rec && d.rec.converged ? " converged" : "");
+      fill.style.height = `${barH}px`;
+      track.appendChild(fill);
+      col.appendChild(track);
+
+      const wd = document.createElement("span");
+      wd.className = "bar-weekday";
+      wd.textContent = d.weekday;
+      col.appendChild(wd);
+
+      col.addEventListener("click", () => {
+        selectedHistoryDate = d.date;
+        openHistorySheet();
+      });
+      el.barsRow.appendChild(col);
+    });
+  }
+
+  function pushSolHistory(r) {
+    solHistory.push(r);
+    if (solHistory.length > 50) solHistory.shift();
+    renderBars();
+    if (!el.historyOverlay.classList.contains("hidden")) renderCalendar();
+  }
+
+  function seedSolHistory(list) {
+    solHistory.length = 0;
+    (list || []).slice(-50).forEach((r) => solHistory.push(r));
+    renderBars();
+  }
+
+  // -------------------------------------------------------------------
+  // 지난 기록 (월간 캘린더 바텀시트)
+  // -------------------------------------------------------------------
+  function openHistorySheet() {
+    if (!selectedHistoryDate) {
+      const byDate = dayIndexFromHistory(solHistory);
+      const dates = Object.keys(byDate).sort();
+      selectedHistoryDate = dates.length ? dates[dates.length - 1] : null;
+    }
+    el.historyOverlay.classList.remove("hidden");
+    renderCalendar();
+  }
+  function closeHistorySheet() {
+    el.historyOverlay.classList.add("hidden");
+  }
+  el.historyBtn.addEventListener("click", openHistorySheet);
+  el.historyClose.addEventListener("click", closeHistorySheet);
+  el.historyOverlay.addEventListener("click", (e) => {
+    if (e.target === el.historyOverlay) closeHistorySheet();
+  });
+
+  function renderCalendar() {
+    const byDate = dayIndexFromHistory(solHistory);
+    const hasAny = Object.keys(byDate).length > 0;
+    el.historyEmpty.classList.toggle("hidden", hasAny);
+    el.calendarGrid.classList.toggle("hidden", !hasAny);
+    if (!hasAny) { el.historyDetail.classList.remove("show"); return; }
+
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth();
+    el.historyMonthLabel.textContent = `${y}년 ${m + 1}월`;
+
+    const firstDay = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+
+    el.calendarGrid.innerHTML = "";
+    WEEKDAY_KR.forEach((w) => {
+      const head = document.createElement("div");
+      head.className = "cal-weekday";
+      head.textContent = w;
+      el.calendarGrid.appendChild(head);
+    });
+    for (let i = 0; i < firstDay; i++) el.calendarGrid.appendChild(document.createElement("div"));
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = new Date(y, m, d).toISOString().slice(0, 10);
+      const rec = byDate[dateStr];
+      const cell = document.createElement("div");
+      cell.className = "cal-cell " + (rec ? "has-record" : "no-record") + (dateStr === selectedHistoryDate ? " selected" : "");
+      const num = document.createElement("div");
+      num.textContent = d;
+      cell.appendChild(num);
+      if (rec) {
+        const dot = document.createElement("div");
+        dot.className = "cal-dot " + (rec.converged ? "converged" : "searching");
+        cell.appendChild(dot);
+        cell.addEventListener("click", () => { selectedHistoryDate = dateStr; renderCalendar(); });
+      }
+      el.calendarGrid.appendChild(cell);
+    }
+
+    const selectedRec = byDate[selectedHistoryDate];
+    if (selectedRec) {
+      const d = new Date(selectedHistoryDate);
+      el.historyDetail.classList.add("show");
+      el.hdDate.textContent = `${d.getMonth() + 1}월 ${d.getDate()}일 · ${WEEKDAY_KR[d.getDay()]}요일`;
+      el.hdSol.textContent = `${selectedRec.sol_min.toFixed(0)}분`;
+      el.hdPills.innerHTML = "";
+      const p1 = document.createElement("span");
+      p1.className = "pill " + (selectedRec.converged ? "pill-converged" : "pill-searching");
+      p1.textContent = selectedRec.converged ? "적정 온도 확정" : "온도 탐색 중";
+      const p2 = document.createElement("span");
+      p2.className = "pill pill-neutral";
+      p2.textContent = `설정 온도 ${selectedRec.session_temp_c.toFixed(1)}℃`;
+      el.hdPills.appendChild(p1);
+      el.hdPills.appendChild(p2);
+    } else {
+      el.historyDetail.classList.remove("show");
+    }
+  }
+
+  // -------------------------------------------------------------------
+  // 최근 10분 온도 추이 (외부 라이브러리 없이 canvas로 직접 그림)
+  // -------------------------------------------------------------------
+  function drawChart() {
+    const canvas = el.chart;
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 320;
+    const cssHeight = 140;
+    canvas.width = cssWidth * dpr;
+    canvas.height = cssHeight * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    if (chartBuffer.length < 2) {
+      ctx.fillStyle = "#9a9689";
+      ctx.font = "13px sans-serif";
+      ctx.fillText("데이터 수집 중...", 10, cssHeight / 2);
+      return;
+    }
+
+    const tMin = chartBuffer[0].t;
+    const tMax = chartBuffer[chartBuffer.length - 1].t;
+    const tSpan = Math.max(1, tMax - tMin);
+
+    const values = [];
+    chartBuffer.forEach((p) => {
+      if (p.skin !== null && p.skin !== undefined) values.push(p.skin);
+      if (p.target !== null && p.target !== undefined) values.push(p.target);
+    });
+    let vMin = values.length ? Math.min(...values) : 35;
+    let vMax = values.length ? Math.max(...values) : 42;
+    if (vMax - vMin < 1) { vMin -= 0.5; vMax += 0.5; }
+    vMin -= 0.4; vMax += 0.4;
+
+    const padL = 6, padR = 6, padT = 8, padB = 8;
+    const x = (t) => padL + ((t - tMin) / tSpan) * (cssWidth - padL - padR);
+    const y = (v) => padT + (1 - (v - vMin) / (vMax - vMin)) * (cssHeight - padT - padB);
+
+    function drawSeries(key, color, dashed) {
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash(dashed ? [5, 4] : []);
+      let started = false;
+      chartBuffer.forEach((p) => {
+        const v = p[key];
+        if (v === null || v === undefined) { started = false; return; }
+        const px = x(p.t), py = y(v);
+        if (!started) { ctx.moveTo(px, py); started = true; }
+        else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    drawSeries("target", "#7a93c9", true);
+    drawSeries("skin", "#c9714e", false);
+  }
+
+  window.addEventListener("resize", drawChart);
+
+  // -------------------------------------------------------------------
+  // 명령 전송
+  // -------------------------------------------------------------------
+  async function sendCommand(cmd) {
+    try {
+      const res = await fetch("/api/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cmd }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(body.detail || "명령 전송 실패", true);
+        return false;
+      }
+      showToast(`전송됨: ${cmd}`);
+      return true;
+    } catch (e) {
+      showToast("네트워크 오류로 명령을 보내지 못했습니다", true);
+      return false;
+    }
+  }
+
+  // -------------------------------------------------------------------
+  // 초기 상태 로드 (WebSocket 첫 메시지가 오기 전 화면 채우기)
+  // -------------------------------------------------------------------
+  async function pollStatusOnce() {
+    try {
+      const res = await fetch("/api/status");
+      const body = await res.json();
+      if (body.status) applyStatus(body.status);
+      if (body.last_result) applyResult(body.last_result);
+      if (body.results) seedSolHistory(body.results);
+    } catch (e) { /* WebSocket 재연결 루프가 안내 문구를 처리하므로 여기선 무시 */ }
+  }
+
+  renderControlSub();
+  renderResultCard();
+  renderBars();
+  pollStatusOnce();
+  setInterval(pollStatusOnce, 5000);
+  connectWS();
+  drawChart();
+})();
+</script>
+</body>
+</html>

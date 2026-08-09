@@ -1,3 +1,11 @@
+# Backend (FastAPI server + serial adapter)
+fastapi
+uvicorn[standard]
+pyserial
+websockets
+
+# Streamlit dashboard
 streamlit
 pandas
 plotly
+requests
