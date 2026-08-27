@@ -90,7 +90,8 @@ class SerialCsvLogger:
         if "[진행상태]" in line:
             if not self._header_written:
                 # 파이썬이 알아서 CSV 첫 줄(헤더)을 만들어줍니다.
-                headers = ["시간(초)", "피부온도(C)", "히터온도(C)", "목표온도(C)", "PWM(%)", "심박수(BPM)", "안전상태", "세션상태", "연속수면(분)", "수면판정"]
+                headers = ["시간(초)", "피부온도(C)", "히터온도(C)", "목표온도(C)", "PWM(%)", "심박수(BPM)",
+                           "안정심박(BPM)", "입면기준(BPM)", "안전상태", "세션상태", "연속수면(분)", "수면판정"]
                 self.csv_writer.writerow(headers)
                 self._header_written = True
                 self.csv_file.flush()
@@ -116,8 +117,8 @@ class SerialCsvLogger:
                 print(f"[데이터 파싱 에러] {line}")
             return
 
-        # 이벤트 및 안내 메시지 (#, @, = 등으로 시작)
-        if line.startswith(("#", "@RESULT", "=")) or "ESP32" in line:
+        # 이벤트 및 안내 메시지: 상태 플래그(@FLAG,...) / 세션 결과(@RESULT,...) / 안내(#, =)
+        if line.startswith(("#", "@", "=")) or "ESP32" in line:
             tagged = f"[{now_iso()}] {line}"
             print(tagged)
             self.event_file.write(tagged + "\n")
