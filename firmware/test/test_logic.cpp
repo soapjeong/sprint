@@ -9,6 +9,7 @@ extern int  g_lastDuty;
 extern bool g_forceBeat;
 extern bool g_mpuAsleep;
 extern bool g_maxShutdown;
+extern bool g_mlxAsleep;
 
 #include "sketch_under_test.inc"   // run_tests.sh 가 build/ 에 생성 (setup/loop 이름만 변경)
 
@@ -42,7 +43,7 @@ int main() {
   // =====================================================================
   // [변경 3] 이상 온도가 5초 이상 지속될 때만 FAULT
   // =====================================================================
-  g_sensorsActive = true;
+  g_tempSensorsActive = true;
   resetSafety();
   step(35.0f, 35.0f);
   for (int i = 0; i < 5; i++) step(43.0f, 35.0f);            // 감지 후 4초 경과까지
@@ -80,13 +81,15 @@ int main() {
   setSensorsActive(false);
   sessionState = SESS_IDLE;
   g_fakeMillis = 100000;
-  check("start 전: 센서 정지", !g_sensorsActive && g_mpuAsleep && g_maxShutdown);
+  check("start 전: 센서 정지",
+        !g_bioSensorsActive && !g_tempSensorsActive && g_mpuAsleep && g_maxShutdown);
   check("start 전: 히터 NTC 측정 안 함(NaN)", isnan(readHeaterTempC()));
 
   lastControlMs = g_fakeMillis; lastLogMs = g_fakeMillis;
   startSession();
   check("start 직후: WARMUP 상태", sessionState == SESS_WARMUP);
-  check("start 직후: 전 센서 측정 시작", g_sensorsActive && !g_maxShutdown && !g_mpuAsleep);
+  check("start 직후: 전 센서 측정 시작",
+        g_bioSensorsActive && g_tempSensorsActive && !g_maxShutdown && !g_mpuAsleep);
   check("워밍업 중: 온도 측정은 수행", !isnan(readHeaterTempC()));
 
   // 워밍업 19초: 심박이 들어와도 버리고, 히터는 계속 꺼져 있어야 한다
@@ -150,10 +153,27 @@ int main() {
     evaluateEpochAndOnset(g_fakeMillis);
   }
   check("20분 연속 유지: 입면 확정", isAsleepConfirmed);
-  check("입면 확정: 세션 OFF", sessionState == SESS_OFF);
-  check("입면 확정: 히터 정지", SETPOINT_C == 0 && g_lastDuty == 0);
-  check("입면 확정: 전 센서 정지", !g_sensorsActive && g_mpuAsleep && g_maxShutdown);
-  check("입면 확정: 기기 전원 종료(딥슬립)", g_deepSleepCalled);
+  check("입면 확정: COOLDOWN(가온 유지) 진입", sessionState == SESS_COOLDOWN);
+  check("입면 확정: 생체 센서 즉시 정지", !g_bioSensorsActive && g_mpuAsleep && g_maxShutdown);
+  check("입면 확정: 온도 센서는 유지(PID/과열 감시)", g_tempSensorsActive);
+  check("입면 확정: 목표 온도 유지", fabsf(SETPOINT_C - sessionTemp) < 0.01f);
+  check("입면 확정 직후: 아직 종료되지 않음", !g_deepSleepCalled);
+
+  // 가온 유지 10분: 히터가 계속 동작해야 한다
+  lastControlMs = g_fakeMillis; lastLogMs = g_fakeMillis;
+  bool heaterRanDuringCooldown = false;
+  for (unsigned long t = 0; t < HEATING_DURATION_MS - 2000; t += CONTROL_PERIOD_MS) {
+    stepLoop();
+    if (g_lastDuty > 0) heaterRanDuringCooldown = true;
+  }
+  check("가온 유지 중: 히터 동작", heaterRanDuringCooldown && sessionState == SESS_COOLDOWN);
+  check("가온 유지 중: 생체 센서는 계속 정지", !g_bioSensorsActive);
+
+  stepLoop(); stepLoop();                       // 10분 경과
+  check("가온 10분 종료: 세션 OFF", sessionState == SESS_OFF);
+  check("가온 10분 종료: 히터 정지", SETPOINT_C == 0 && g_lastDuty == 0);
+  check("가온 10분 종료: 온도 센서까지 정지", !g_tempSensorsActive);
+  check("가온 10분 종료: 기기 전원 종료(딥슬립)", g_deepSleepCalled);
 
   // =====================================================================
   // [변경 2+5] 60분 미입면 -> 히터·센서 정지 후 기기 종료
@@ -170,7 +190,8 @@ int main() {
   g_fakeMillis += 1000;
   updateSession(g_fakeMillis);
   check("60분 미입면: 세션 OFF", sessionState == SESS_OFF);
-  check("60분 미입면: 전 센서 정지", !g_sensorsActive && g_mpuAsleep && g_maxShutdown);
+  check("60분 미입면: 전 센서 정지",
+        !g_bioSensorsActive && !g_tempSensorsActive && g_mpuAsleep && g_maxShutdown);
   check("60분 미입면: 기기 전원 종료(딥슬립)", g_deepSleepCalled);
   check("60분 미입면: SOL 60분으로 기록",
         g_profile.nBins == 1 && fabsf(binMean(&g_profile.bins[0]) - 60.0f) < 0.01f);

@@ -1,5 +1,5 @@
 /* ============================================================================
- * ESP32 개인 맞춤 입면 온도 탐색기 — 실제 하드웨어 통합 버전 (v5)
+ * ESP32 개인 맞춤 입면 온도 탐색기 — 실제 하드웨어 통합 버전 (v6)
  * (Personalized Sleep-Onset Temperature Optimizer for real ESP32 kit)
  *
  * v3 -> v4 변경점
@@ -16,7 +16,13 @@
  *     start 누르면 측정을 시작하고, 처음 20초(SENSOR_WARMUP_MS)는 워밍업 구간으로
  *     모든 센서 데이터를 버린다. 이 구간에는 유효한 온도 기준이 없으므로 히터도 켜지
  *     않는다(가열은 워밍업 종료 후 시작).
- *  5) 입면 확정 또는 60분 미입면(타임아웃) -> 히터 + 모든 센서 정지 후 기기 종료.
+ *  5) 60분 미입면(타임아웃) -> 히터 + 모든 센서 정지 후 기기 종료.
+ *
+ * v5 -> v6 변경점
+ *  6) 입면 확정 시: 입면 판정용 생체 센서(MPU6050/MAX30102)는 즉시 정지하고,
+ *     목표 온도로 HEATING_DURATION_MS(10분) 동안 가온을 유지한 뒤 히터와 온도 센서를
+ *     정지시키고 기기를 종료한다. 가온 중에는 PID 입력(MLX90614)과 과열 감시(NTC)가
+ *     반드시 필요하므로 온도 센서 2종은 히터가 꺼질 때 함께 끈다.
  * ========================================================================== */
 
 #include <Wire.h>
@@ -108,8 +114,10 @@ static const int  REQUIRED_SLEEP_EPOCHS        = 20;        // 연속 20에폭(2
 static const float MOTION_EPOCH_THRESHOLD      = 5.0f;      // 에폭 누적 움직임 임계값
 static const unsigned long SESSION_MAX_MS      = 60UL * 60 * 1000;  // 세션 최대 60분
 
-// [변경 5] 입면 확정 시 동작: 0 = 즉시 전 계통 종료, 1 = 아래 시간만큼 가온 유지 후 종료
-#define KEEP_HEATING_AFTER_ONSET 0
+// [변경 6] 입면 확정 시 동작
+//   1 = 생체 센서만 즉시 정지하고 아래 시간만큼 가온 유지 후 히터/온도 센서 정지(기본)
+//   0 = 입면 확정 즉시 히터와 모든 센서 정지
+#define KEEP_HEATING_AFTER_ONSET 1
 static const unsigned long HEATING_DURATION_MS = 10UL * 60000UL;    // 10분
 
 // ------- [변경 4] 센서 워밍업: start 직후 이 시간 동안의 모든 센서 데이터를 버린다 -------
@@ -173,7 +181,9 @@ static bool  parabolaVertex(float x1,float y1,float x2,float y2,float x3,float y
 static float ensureSpacing(const Profile* p, float t);
 static SearchResult nextTemperature(const Profile* p);
 
-static void setSensorsActive(bool on);   // 모든 센서 측정 시작/정지
+static void setBioSensorsActive(bool on);   // MPU6050 + MAX30102 (입면 판정용)
+static void setTempSensorsActive(bool on);  // MLX90614 + NTC (PID/과열 감시용)
+static void setSensorsActive(bool on);      // 위 둘을 한 번에
 static bool sensorDataAccepted();        // 워밍업이 끝나 데이터를 신뢰할 수 있는가
 
 static void  pwmSetup();
@@ -213,7 +223,9 @@ static Adafruit_MPU6050 mpu;
 static Adafruit_MLX90614 mlx;
 static MAX30105 particleSensor;
 static bool g_mpuOk = false, g_mlxOk = false, g_maxOk = false;
-static bool g_sensorsActive = false;   // [변경 4] start 전/종료 후에는 모든 센서 정지
+// [변경 4] start 전/종료 후에는 모든 센서 정지
+static bool g_bioSensorsActive  = false;  // MPU6050 + MAX30102 (입면 판정용)
+static bool g_tempSensorsActive = false;  // MLX90614 + NTC     (PID 제어 + 과열 감시용)
 
 // PID 내부
 static float pidIntegral = 0.0f, pidPrevError = 0.0f;
@@ -271,39 +283,57 @@ static Preferences prefs;
 // ---- [변경 4] 센서 측정 시작/정지 ----
 //   start 전, 그리고 세션 종료 후에는 모든 센서를 정지시킨다.
 //   NTC 분압 회로는 상시 전원이라 물리적으로 끌 수 없으므로 ADC 샘플링을 멈춘다.
+//
+//   센서는 두 계통으로 나눠 제어한다.
+//    - 생체 센서(MPU6050 / MAX30102): 입면 판정 전용. 입면이 확정되면 바로 정지.
+//    - 온도 센서(MLX90614 / NTC)    : PID 제어 + 과열 감시용. 히터가 켜져 있는 동안은
+//                                     반드시 살아 있어야 하므로 히터를 끌 때 함께 끈다.
 // ===========================================================================
-static void setSensorsActive(bool on) {
+static void setBioSensorsActive(bool on) {
   if (on) {
     if (g_mpuOk) mpu.enableSleep(false);
     if (g_maxOk) particleSensor.wakeUp();
-#if MLX_HAS_SLEEP_API
-    if (g_mlxOk) mlx.enterSleepMode(false);
-#endif
-    g_sensorsActive = true;
-
-    // 새 세션의 측정값이 이전 세션 값에 오염되지 않도록 초기화
-    lastLoggedSkinC = NAN; lastLoggedHeaterC = NAN;
+    g_bioSensorsActive = true;
     latestBpm = 0; lastBeatMs = millis();
     prevAx = prevAy = prevAz = 0;
     epochMotionAccum = 0.0f;
     epochHrSum = 0; epochHrCount = 0; epochHrAbove = 0;
-    Serial.println("# 센서 측정 시작 (MLX90614 / NTC / MPU6050 / MAX30102)");
+    Serial.println("# 생체 센서 측정 시작 (MPU6050 / MAX30102)");
   } else {
     if (g_mpuOk) mpu.enableSleep(true);
     if (g_maxOk) particleSensor.shutDown();
-#if MLX_HAS_SLEEP_API
-    if (g_mlxOk) mlx.enterSleepMode(true);
-#endif
-    g_sensorsActive = false;
-    lastLoggedSkinC = NAN; lastLoggedHeaterC = NAN;
+    g_bioSensorsActive = false;
     latestBpm = 0;
-    Serial.println("# 센서 측정 정지 (전 센서 대기 모드)");
+    Serial.println("# 생체 센서 측정 정지 (MPU6050 / MAX30102)");
   }
 }
 
-// 워밍업(SESS_WARMUP) 동안의 데이터는 모두 버린다.
+static void setTempSensorsActive(bool on) {
+  if (on) {
+#if MLX_HAS_SLEEP_API
+    if (g_mlxOk) mlx.enterSleepMode(false);
+#endif
+    g_tempSensorsActive = true;
+    lastLoggedSkinC = NAN; lastLoggedHeaterC = NAN;
+    Serial.println("# 온도 센서 측정 시작 (MLX90614 / NTC)");
+  } else {
+#if MLX_HAS_SLEEP_API
+    if (g_mlxOk) mlx.enterSleepMode(true);
+#endif
+    g_tempSensorsActive = false;
+    lastLoggedSkinC = NAN; lastLoggedHeaterC = NAN;
+    Serial.println("# 온도 센서 측정 정지 (MLX90614 / NTC)");
+  }
+}
+
+static void setSensorsActive(bool on) {
+  setBioSensorsActive(on);
+  setTempSensorsActive(on);
+}
+
+// 워밍업(SESS_WARMUP) 동안의 온도 데이터는 제어/안전 판정에 쓰지 않는다.
 static bool sensorDataAccepted() {
-  return g_sensorsActive && sessionState != SESS_WARMUP;
+  return g_tempSensorsActive && sessionState != SESS_WARMUP;
 }
 
 // ===========================================================================
@@ -332,7 +362,7 @@ static float heaterResistanceToTempC(float rOhm) {
 }
 
 static float readHeaterTempC() {
-  if (!g_sensorsActive) return NAN;          // 센서 정지 중에는 측정하지 않는다
+  if (!g_tempSensorsActive) return NAN;      // 센서 정지 중에는 측정하지 않는다
   uint32_t acc = 0;
   for (int i = 0; i < ADC_SAMPLES; i++) acc += analogReadMilliVolts(NTC_PIN);
   float mv = (float)acc / ADC_SAMPLES;
@@ -615,8 +645,8 @@ static void resetPID() {
 // 센서 폴링 — 매 루프 누적, 1분마다 판정
 // ===========================================================================
 static void pollMotionAndHR() {
-  if (!g_sensorsActive) return;             // [변경 4] start 전 / 종료 후에는 측정하지 않는다
-  bool accept = sensorDataAccepted();       // 워밍업 20초 동안은 읽되 버린다
+  if (!g_bioSensorsActive) return;          // [변경 4] start 전 / 입면 확정 후에는 측정하지 않는다
+  bool accept = (sessionState != SESS_WARMUP);  // 워밍업 20초 동안은 읽되 버린다
 
   // ---- MPU6050: 가속도 변화량을 에폭 동안 누적 (움직임 지표) ----
   if (g_mpuOk) {
@@ -874,14 +904,18 @@ static void onSleepOnsetConfirmed(unsigned long onsetMs) {
   Serial.println(sr.nextTemp,1);
 
 #if KEEP_HEATING_AFTER_ONSET
-  // 입면 확정 후에도 목표 온도로 HEATING_DURATION_MS 동안 가온 유지
+  // [변경 6] 입면 판정이 끝났으므로 생체 센서(MPU6050/MAX30102)는 즉시 정지한다.
+  //          온도 센서는 가온 유지 구간의 PID 제어와 과열 감시에 필요하므로 남겨두고,
+  //          HEATING_DURATION_MS 가 끝나면 히터와 함께 정지시킨다.
+  setBioSensorsActive(false);
   cooldownEndMs = millis() + HEATING_DURATION_MS;
   sessionState  = SESS_COOLDOWN;
-  Serial.print("# COOLDOWN 진입: 앞으로 ");
+  Serial.print("# COOLDOWN 진입: 생체 센서 정지, 앞으로 ");
   Serial.print(HEATING_DURATION_MS / 60000UL);
-  Serial.println("분간 가온을 유지합니다.");
+  Serial.println("분간 가온을 유지합니다(온도 센서는 안전 감시를 위해 유지).");
+  sendServerFlag("COOLDOWN_START", SETPOINT_C, HEATING_DURATION_MS / 60000.0f);
 #else
-  // [변경 5] 입면이 확정되면 히터와 모든 센서를 끄고 기기를 종료한다
+  // 입면이 확정되면 히터와 모든 센서를 끄고 기기를 종료한다
   manualTempSet = false;
   shutdownDevice("SLEEP_ONSET");
 #endif
@@ -992,7 +1026,11 @@ static void logCsv(unsigned long t, float skinC, float heaterC, int duty) {
   Serial.print("안정심박:"); Serial.print(isnan(g_restingBpm) ? 0.0f : g_restingBpm, 0); Serial.print("BPM | ");
   Serial.print("입면기준:"); Serial.print(isnan(g_onsetHrThreshold) ? 0.0f : g_onsetHrThreshold, 0); Serial.print("BPM | ");
 
-  Serial.print("센서:");     Serial.print(g_sensorsActive ? (sensorDataAccepted() ? "ON" : "WARMUP") : "OFF");
+  const char* sensorTag = "OFF";
+  if (g_bioSensorsActive && g_tempSensorsActive) sensorTag = (sessionState == SESS_WARMUP) ? "WARMUP" : "ON";
+  else if (g_tempSensorsActive)                  sensorTag = "TEMP";   // 가온 유지 구간(생체 센서 정지)
+  else if (g_bioSensorsActive)                   sensorTag = "BIO";
+  Serial.print("센서:");     Serial.print(sensorTag);
   Serial.print(" | ");
   Serial.print("안전:");     Serial.print(stateName(safetyState)); Serial.print(" | ");
   Serial.print("세션:");     Serial.print(sessName(sessionState)); Serial.print(" | ");
@@ -1044,7 +1082,7 @@ static void handleSerial(float skinC, float heaterC) {
         g_restingBpm = NAN; g_onsetHrThreshold = NAN;
         continuousQuietEpochs = 0;
         // FAULT 상태에서는 온도를 계속 감시해야 하므로 센서를 끄지 않는다
-        if (safetyState == STATE_NORMAL && g_sensorsActive) setSensorsActive(false);
+        if (safetyState == STATE_NORMAL) setSensorsActive(false);
         Serial.println("# SESSION aborted");
       } else if (strncmp(buf,"set ",4) == 0) {
         sessionTemp = clampSearch(atof(buf+4));
@@ -1150,8 +1188,9 @@ void setup() {
   Serial.print("# SessionTimeout="); Serial.print(SESSION_MAX_MS/60000UL);
   Serial.println("min (미입면 시 히터/센서 정지 후 기기 전원 종료)");
 #if KEEP_HEATING_AFTER_ONSET
-  Serial.print("# 입면 확정 시: "); Serial.print(HEATING_DURATION_MS/60000UL);
-  Serial.println("분 가온 유지 후 히터/센서 정지");
+  Serial.print("# 입면 확정 시: 생체 센서 즉시 정지 + ");
+  Serial.print(HEATING_DURATION_MS/60000UL);
+  Serial.println("분 가온 유지 후 히터/온도 센서 정지 및 기기 전원 종료");
 #else
   Serial.println("# 입면 확정 시: 즉시 히터/센서 정지 후 기기 전원 종료");
 #endif
@@ -1182,7 +1221,7 @@ void loop() {
     //          워밍업(SESS_WARMUP) 중에는 읽기만 하고 안전 판정/PID 에는 쓰지 않는다.
     bool accepted = sensorDataAccepted();
     float heaterC = readHeaterTempC();                                        // NTC: 히터 표면(안전감시용)
-    float skinC   = (g_sensorsActive && g_mlxOk) ? mlx.readObjectTempC() : NAN; // MLX90614: 피부(제어 목표)
+    float skinC   = (g_tempSensorsActive && g_mlxOk) ? mlx.readObjectTempC() : NAN; // MLX90614: 피부(제어 목표)
 
     if (accepted) {
       safetyState = evaluateSafety(skinC, heaterC, lastLoggedSkinC, lastLoggedHeaterC, safetyState, now);
@@ -1215,7 +1254,7 @@ void loop() {
     }
 
     // 세션이 없고 FAULT 도 해소된 상태면 센서를 정지시킨다
-    if (g_sensorsActive && safetyState == STATE_NORMAL
+    if ((g_bioSensorsActive || g_tempSensorsActive) && safetyState == STATE_NORMAL
         && (sessionState == SESS_IDLE || sessionState == SESS_OFF)) {
       setSensorsActive(false);
     }
