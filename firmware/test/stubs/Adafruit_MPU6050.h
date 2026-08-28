@@ -5,5 +5,6 @@ class Adafruit_MPU6050 {
 public:
   bool begin();
   void setAccelerometerRange(int);
+  void enableSleep(bool);
   bool getEvent(sensors_event_t*, sensors_event_t*, sensors_event_t*);
 };

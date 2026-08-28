@@ -1,16 +1,22 @@
 /* ============================================================================
- * ESP32 개인 맞춤 입면 온도 탐색기 — 실제 하드웨어 통합 버전 (v4)
+ * ESP32 개인 맞춤 입면 온도 탐색기 — 실제 하드웨어 통합 버전 (v5)
  * (Personalized Sleep-Onset Temperature Optimizer for real ESP32 kit)
  *
  * v3 -> v4 변경점
  *  1) 심박 기준선(안정심박수) 자동 캘리브레이션
- *     - start 직후 20초 = 노이즈 구간, 데이터 폐기
  *     - 이후 30초 = 안정심박수 수집(평균) -> 이번 세션의 기준값
  *     - 실시간 심박이 (안정심박수 - 10) BPM 이하로 20분 이상 유지 + 움직임 없음
  *       -> 입면 판정 후 서버(호스트 PC)로 상태 플래그 전송
  *  2) 60분 동안 입면 판정이 없으면 결과 기록 후 기기 전원 차단(딥슬립)
  *  3) 이상 온도는 5초 이상 연속 유지될 때만 FAULT로 래치
  *     (판정 대기 중에도 히터 출력은 즉시 0으로 차단 — 안전 우선)
+ *
+ * v4 -> v5 변경점
+ *  4) 모든 센서(MLX90614 / NTC / MPU6050 / MAX30102)는 start 전까지 정지 상태.
+ *     start 누르면 측정을 시작하고, 처음 20초(SENSOR_WARMUP_MS)는 워밍업 구간으로
+ *     모든 센서 데이터를 버린다. 이 구간에는 유효한 온도 기준이 없으므로 히터도 켜지
+ *     않는다(가열은 워밍업 종료 후 시작).
+ *  5) 입면 확정 또는 60분 미입면(타임아웃) -> 히터 + 모든 센서 정지 후 기기 종료.
  * ========================================================================== */
 
 #include <Wire.h>
@@ -87,7 +93,12 @@ enum SafetyState {
 // ===========================================================================
 // 세션 상태
 // ===========================================================================
-enum SessionState { SESS_IDLE = 0, SESS_RUNNING, SESS_COOLDOWN, SESS_DONE, SESS_OFF };
+//  IDLE   : 대기(센서 정지)
+//  WARMUP : start 직후 20초 — 센서만 켜서 안정화, 데이터는 버리고 히터도 끔
+//  RUNNING: 가온 + 안정심박수 측정 + 입면 판정
+//  COOLDOWN: (KEEP_HEATING_AFTER_ONSET=1 일 때만) 입면 후 가온 유지
+//  OFF    : 종료(히터·센서 정지)
+enum SessionState { SESS_IDLE = 0, SESS_WARMUP, SESS_RUNNING, SESS_COOLDOWN, SESS_OFF };
 
 // ===========================================================================
 // 입면(Sleep Onset) 추정 — 1분 에폭 누적
@@ -97,12 +108,15 @@ static const int  REQUIRED_SLEEP_EPOCHS        = 20;        // 연속 20에폭(2
 static const float MOTION_EPOCH_THRESHOLD      = 5.0f;      // 에폭 누적 움직임 임계값
 static const unsigned long SESSION_MAX_MS      = 60UL * 60 * 1000;  // 세션 최대 60분
 
-// 입면 확정 후에도 이 시간만큼 목표온도로 가온 유지
+// [변경 5] 입면 확정 시 동작: 0 = 즉시 전 계통 종료, 1 = 아래 시간만큼 가온 유지 후 종료
+#define KEEP_HEATING_AFTER_ONSET 0
 static const unsigned long HEATING_DURATION_MS = 10UL * 60000UL;    // 10분
 
+// ------- [변경 4] 센서 워밍업: start 직후 이 시간 동안의 모든 센서 데이터를 버린다 -------
+static const unsigned long SENSOR_WARMUP_MS = 20000UL;  // 20초 (온도/움직임/심박 공통)
+
 // ------- [변경 1] 심박 기준선(안정심박수) 캘리브레이션 -------
-static const unsigned long CALIB_DISCARD_MS = 20000UL;  // start 직후 20초: 노이즈로 간주, 폐기
-static const unsigned long CALIB_COLLECT_MS = 30000UL;  // 이후 30초: 안정심박수 수집
+static const unsigned long CALIB_COLLECT_MS = 30000UL;  // 워밍업 후 30초: 안정심박수 수집
 static const int   CALIB_MIN_SAMPLES  = 10;             // 30초 동안 최소 확보해야 할 비트 수
 static const int   CALIB_MAX_ATTEMPTS = 3;              // 수집 실패 시 재시도 횟수
 static const float RESTING_BPM_MIN    = 40.0f;          // 안정심박수 허용 범위
@@ -114,8 +128,12 @@ static const float HR_FALLBACK_RESTING_BPM = 60.0f;     // 캘리브레이션 �
 static const int   MIN_HR_SAMPLES_PER_EPOCH = 10;       // 에폭이 유효하려면 필요한 비트 수
 static const float HR_ABOVE_RATIO_MAX       = 0.25f;    // 기준 초과 샘플 비율 허용치
 
-// 전원 차단 방식: 1 = 딥슬립(버튼으로 재기동), 0 = 히터만 끄고 SESS_OFF 유지
+// 전원 차단 방식: 1 = 딥슬립(버튼으로 재기동), 0 = 히터/센서만 끄고 SESS_OFF 유지
 #define POWER_OFF_USE_DEEP_SLEEP 1
+
+// MLX90614 라이브러리에 enterSleepMode() 가 있는 버전이면 1 로 두면 절전까지 수행한다.
+// (0 이어도 읽기를 멈추므로 측정은 정지된다)
+#define MLX_HAS_SLEEP_API 0
 
 // ===========================================================================
 // 적응형 온도 탐색 파라미터
@@ -155,13 +173,16 @@ static bool  parabolaVertex(float x1,float y1,float x2,float y2,float x3,float y
 static float ensureSpacing(const Profile* p, float t);
 static SearchResult nextTemperature(const Profile* p);
 
+static void setSensorsActive(bool on);   // 모든 센서 측정 시작/정지
+static bool sensorDataAccepted();        // 워밍업이 끝나 데이터를 신뢰할 수 있는가
+
 static void  pwmSetup();
 static void  pwmWrite(int duty);
 static float computePID(float setpoint, float tempC, float dtSec);
 static void  resetPID();
 
 static void pollMotionAndHR();                        // 매 루프: 움직임/심박 누적 (Non-blocking)
-static void updateCalibration(unsigned long now);     // start 직후 20s 폐기 + 30s 평균
+static void updateCalibration(unsigned long now);     // 워밍업 후 30초 평균 = 안정심박수
 static void evaluateEpochAndOnset(unsigned long now); // 1분마다: 입면 판정
 
 static void profileClear(Profile* p);
@@ -192,6 +213,7 @@ static Adafruit_MPU6050 mpu;
 static Adafruit_MLX90614 mlx;
 static MAX30105 particleSensor;
 static bool g_mpuOk = false, g_mlxOk = false, g_maxOk = false;
+static bool g_sensorsActive = false;   // [변경 4] start 전/종료 후에는 모든 센서 정지
 
 // PID 내부
 static float pidIntegral = 0.0f, pidPrevError = 0.0f;
@@ -207,7 +229,7 @@ static float spikeRefSkinC   = NAN;      // 스파이크 감지 시점의 온도
 static float spikeRefHeaterC = NAN;
 
 // ---- 심박 기준선(캘리브레이션) 상태 ----
-enum CalibState { CAL_NONE = 0, CAL_DISCARD, CAL_COLLECT, CAL_READY, CAL_FAILED };
+enum CalibState { CAL_NONE = 0, CAL_COLLECT, CAL_READY, CAL_FAILED };
 static CalibState    calibState      = CAL_NONE;
 static unsigned long calibPhaseMs    = 0;
 static double        calibBpmSum     = 0;
@@ -246,6 +268,45 @@ static char g_personId[16] = "default";
 static Preferences prefs;
 
 // ===========================================================================
+// ---- [변경 4] 센서 측정 시작/정지 ----
+//   start 전, 그리고 세션 종료 후에는 모든 센서를 정지시킨다.
+//   NTC 분압 회로는 상시 전원이라 물리적으로 끌 수 없으므로 ADC 샘플링을 멈춘다.
+// ===========================================================================
+static void setSensorsActive(bool on) {
+  if (on) {
+    if (g_mpuOk) mpu.enableSleep(false);
+    if (g_maxOk) particleSensor.wakeUp();
+#if MLX_HAS_SLEEP_API
+    if (g_mlxOk) mlx.enterSleepMode(false);
+#endif
+    g_sensorsActive = true;
+
+    // 새 세션의 측정값이 이전 세션 값에 오염되지 않도록 초기화
+    lastLoggedSkinC = NAN; lastLoggedHeaterC = NAN;
+    latestBpm = 0; lastBeatMs = millis();
+    prevAx = prevAy = prevAz = 0;
+    epochMotionAccum = 0.0f;
+    epochHrSum = 0; epochHrCount = 0; epochHrAbove = 0;
+    Serial.println("# 센서 측정 시작 (MLX90614 / NTC / MPU6050 / MAX30102)");
+  } else {
+    if (g_mpuOk) mpu.enableSleep(true);
+    if (g_maxOk) particleSensor.shutDown();
+#if MLX_HAS_SLEEP_API
+    if (g_mlxOk) mlx.enterSleepMode(true);
+#endif
+    g_sensorsActive = false;
+    lastLoggedSkinC = NAN; lastLoggedHeaterC = NAN;
+    latestBpm = 0;
+    Serial.println("# 센서 측정 정지 (전 센서 대기 모드)");
+  }
+}
+
+// 워밍업(SESS_WARMUP) 동안의 데이터는 모두 버린다.
+static bool sensorDataAccepted() {
+  return g_sensorsActive && sessionState != SESS_WARMUP;
+}
+
+// ===========================================================================
 // ---- NTC(히터) 온도 변환 : 안전감시 전용 ----
 // ===========================================================================
 static float heaterVoltageToResistance(float vNodeMv) {
@@ -271,6 +332,7 @@ static float heaterResistanceToTempC(float rOhm) {
 }
 
 static float readHeaterTempC() {
+  if (!g_sensorsActive) return NAN;          // 센서 정지 중에는 측정하지 않는다
   uint32_t acc = 0;
   for (int i = 0; i < ADC_SAMPLES; i++) acc += analogReadMilliVolts(NTC_PIN);
   float mv = (float)acc / ADC_SAMPLES;
@@ -378,9 +440,9 @@ static const char* stateName(SafetyState s) {
 static const char* sessName(SessionState s) {
   switch (s) {
     case SESS_IDLE:     return "IDLE";
+    case SESS_WARMUP:   return "WARMUP";
     case SESS_RUNNING:  return "RUNNING";
     case SESS_COOLDOWN: return "COOLDOWN";
-    case SESS_DONE:     return "DONE";
     case SESS_OFF:      return "OFF";
     default:            return "?";
   }
@@ -553,13 +615,18 @@ static void resetPID() {
 // 센서 폴링 — 매 루프 누적, 1분마다 판정
 // ===========================================================================
 static void pollMotionAndHR() {
+  if (!g_sensorsActive) return;             // [변경 4] start 전 / 종료 후에는 측정하지 않는다
+  bool accept = sensorDataAccepted();       // 워밍업 20초 동안은 읽되 버린다
+
   // ---- MPU6050: 가속도 변화량을 에폭 동안 누적 (움직임 지표) ----
   if (g_mpuOk) {
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
-    epochMotionAccum += fabsf(a.acceleration.x - prevAx)
-                      + fabsf(a.acceleration.y - prevAy)
-                      + fabsf(a.acceleration.z - prevAz);
+    if (accept) {
+      epochMotionAccum += fabsf(a.acceleration.x - prevAx)
+                        + fabsf(a.acceleration.y - prevAy)
+                        + fabsf(a.acceleration.z - prevAz);
+    }
     prevAx = a.acceleration.x; prevAy = a.acceleration.y; prevAz = a.acceleration.z;
   }
 
@@ -580,8 +647,8 @@ static void pollMotionAndHR() {
   if (latestBpm == 0) latestBpm = instantBpm;      // 제일 처음엔 현재 값으로 초기화
   else                latestBpm = (latestBpm * 0.85f) + (instantBpm * 0.15f);
 
-  // [변경 1] start 직후 20초(CAL_DISCARD) 데이터는 노이즈로 간주하여 버린다
-  if (calibState == CAL_DISCARD) return;
+  // [변경 4] 워밍업 20초 동안의 심박은 노이즈로 간주하여 버린다
+  if (!accept) return;
 
   if (calibState == CAL_COLLECT) {                 // 30초간 안정심박수 수집
     calibBpmSum += latestBpm;
@@ -596,22 +663,8 @@ static void pollMotionAndHR() {
   }
 }
 
-// ---- [변경 1] 안정심박수 캘리브레이션 상태 머신 (start 직후 20s 폐기 + 30s 평균) ----
+// ---- [변경 1] 안정심박수 캘리브레이션 (워밍업 종료 후 30초 평균) ----
 static void updateCalibration(unsigned long now) {
-  if (calibState == CAL_DISCARD) {
-    if (now - calibPhaseMs < CALIB_DISCARD_MS) return;
-    calibState    = CAL_COLLECT;
-    calibPhaseMs  = now;
-    calibBpmSum   = 0;
-    calibBpmCount = 0;
-    Serial.print("# 심박 안정화 구간(");
-    Serial.print(CALIB_DISCARD_MS / 1000UL);
-    Serial.print("초) 종료 — 지금부터 ");
-    Serial.print(CALIB_COLLECT_MS / 1000UL);
-    Serial.println("초간 안정심박수를 측정합니다.");
-    return;
-  }
-
   if (calibState != CAL_COLLECT) return;
   if (now - calibPhaseMs < CALIB_COLLECT_MS) return;
 
@@ -769,29 +822,31 @@ static void startSession() {
   continuousQuietEpochs = 0;
   isAsleepConfirmed = false;
 
-  // [변경 1] start 신호 직후: 20초 폐기 구간부터 시작
-  calibState    = CAL_DISCARD;
+  calibState    = CAL_NONE;      // 워밍업이 끝나면 CAL_COLLECT 로 전환
   calibPhaseMs  = sessionStartMs;
   calibBpmSum   = 0;
   calibBpmCount = 0;
   calibAttempts = 0;
   g_restingBpm       = NAN;
   g_onsetHrThreshold = NAN;
-  latestBpm  = 0;          // 이전 세션의 평활값이 남지 않도록 초기화
-  lastBeatMs = sessionStartMs;
 
-  sessionState = SESS_RUNNING;
+  // [변경 4] start 신호를 받은 지금부터 모든 센서 측정 시작
+  //          — 처음 SENSOR_WARMUP_MS 동안의 데이터는 전부 버리고 히터도 켜지 않는다
+  sessionState = SESS_WARMUP;
+  setSensorsActive(true);
+  clearFaultPending();
   resetPID();
   Serial.print("# SESSION START  person=");
   Serial.print(g_personId);
   Serial.print("  temp=");
   Serial.print(sessionTemp,1);
   Serial.println("C");
-  Serial.print("# 심박 안정화: 처음 ");
-  Serial.print(CALIB_DISCARD_MS / 1000UL);
-  Serial.print("초 데이터는 버리고, 다음 ");
+  Serial.print("# 센서 워밍업 ");
+  Serial.print(SENSOR_WARMUP_MS / 1000UL);
+  Serial.println("초: 모든 센서 데이터를 버리며, 이 구간에는 히터를 켜지 않습니다.");
+  Serial.print("# 워밍업 후 ");
   Serial.print(CALIB_COLLECT_MS / 1000UL);
-  Serial.println("초 평균을 안정심박수로 사용합니다.");
+  Serial.println("초 평균을 이번 세션의 안정심박수로 사용합니다.");
   sendServerFlag("SESSION_START", sessionTemp, 0);
 }
 
@@ -818,12 +873,18 @@ static void onSleepOnsetConfirmed(unsigned long onsetMs) {
   Serial.print(sr.bestSol,2); Serial.print(',');
   Serial.println(sr.nextTemp,1);
 
+#if KEEP_HEATING_AFTER_ONSET
   // 입면 확정 후에도 목표 온도로 HEATING_DURATION_MS 동안 가온 유지
   cooldownEndMs = millis() + HEATING_DURATION_MS;
   sessionState  = SESS_COOLDOWN;
   Serial.print("# COOLDOWN 진입: 앞으로 ");
   Serial.print(HEATING_DURATION_MS / 60000UL);
   Serial.println("분간 가온을 유지합니다.");
+#else
+  // [변경 5] 입면이 확정되면 히터와 모든 센서를 끄고 기기를 종료한다
+  manualTempSet = false;
+  shutdownDevice("SLEEP_ONSET");
+#endif
 }
 
 // [변경 2] 세션 최대시간(60분) 내 미입면 — 결과 기록 후 기기 전원 차단
@@ -847,6 +908,7 @@ static void shutdownDevice(const char* reason) {
   SETPOINT_C   = 0;
   sessionState = SESS_OFF;
   resetPID();
+  setSensorsActive(false);       // [변경 5] 히터와 함께 모든 센서 정지
 
   Serial.print("# 기기를 종료합니다 (사유: ");
   Serial.print(reason);
@@ -868,6 +930,31 @@ static void shutdownDevice(const char* reason) {
 static void updateSession(unsigned long now) {
   if (now < sessionStartMs) return;
 
+  // [변경 4] 워밍업: 센서만 돌리고 데이터는 버린다. 히터는 아직 켜지 않는다.
+  if (sessionState == SESS_WARMUP) {
+    if (now - sessionStartMs < SENSOR_WARMUP_MS) return;
+
+    sessionState = SESS_RUNNING;
+    lastLoggedSkinC = NAN; lastLoggedHeaterC = NAN;   // 첫 유효 샘플이 급상승으로 오판되지 않도록
+    clearFaultPending();
+    resetPID();
+    calibState    = CAL_COLLECT;                     // 이제부터 30초간 안정심박수 수집
+    calibPhaseMs  = now;
+    calibBpmSum   = 0;
+    calibBpmCount = 0;
+    epochMotionAccum = 0.0f;
+    epochHrSum = 0; epochHrCount = 0; epochHrAbove = 0;
+    lastEpochStartMs = now;
+
+    Serial.print("# 센서 워밍업 종료 — 가온 시작(목표 ");
+    Serial.print(SETPOINT_C, 1);
+    Serial.print("C), 안정심박수 ");
+    Serial.print(CALIB_COLLECT_MS / 1000UL);
+    Serial.println("초 측정 시작");
+    sendServerFlag("WARMUP_DONE", SETPOINT_C, 0);
+    return;
+  }
+
   if (sessionState == SESS_RUNNING) {
     updateCalibration(now);
     evaluateEpochAndOnset(now);
@@ -876,11 +963,10 @@ static void updateSession(unsigned long now) {
     }
   } else if (sessionState == SESS_COOLDOWN) {
     if (now >= cooldownEndMs) {
-      Serial.println("# COOLDOWN 종료: 히터 정지");
-      sessionState  = SESS_DONE;
+      Serial.println("# COOLDOWN 종료: 히터/센서 정지");
       manualTempSet = false;
-      SETPOINT_C    = 0;
       sendServerFlag("SESSION_DONE", 0, 0);
+      shutdownDevice("COOLDOWN_END");
     }
   }
 }
@@ -906,6 +992,8 @@ static void logCsv(unsigned long t, float skinC, float heaterC, int duty) {
   Serial.print("안정심박:"); Serial.print(isnan(g_restingBpm) ? 0.0f : g_restingBpm, 0); Serial.print("BPM | ");
   Serial.print("입면기준:"); Serial.print(isnan(g_onsetHrThreshold) ? 0.0f : g_onsetHrThreshold, 0); Serial.print("BPM | ");
 
+  Serial.print("센서:");     Serial.print(g_sensorsActive ? (sensorDataAccepted() ? "ON" : "WARMUP") : "OFF");
+  Serial.print(" | ");
   Serial.print("안전:");     Serial.print(stateName(safetyState)); Serial.print(" | ");
   Serial.print("세션:");     Serial.print(sessName(sessionState)); Serial.print(" | ");
 
@@ -955,6 +1043,8 @@ static void handleSerial(float skinC, float heaterC) {
         calibState = CAL_NONE;
         g_restingBpm = NAN; g_onsetHrThreshold = NAN;
         continuousQuietEpochs = 0;
+        // FAULT 상태에서는 온도를 계속 감시해야 하므로 센서를 끄지 않는다
+        if (safetyState == STATE_NORMAL && g_sensorsActive) setSensorsActive(false);
         Serial.println("# SESSION aborted");
       } else if (strncmp(buf,"set ",4) == 0) {
         sessionTemp = clampSearch(atof(buf+4));
@@ -1032,6 +1122,9 @@ void setup() {
     prevAx = a.acceleration.x; prevAy = a.acceleration.y; prevAz = a.acceleration.z;
   }
 
+  // [변경 4] 검출만 해두고 start 전까지는 모든 센서를 정지시켜 둔다
+  setSensorsActive(false);
+
   profileClear(&g_profile);
   loadProfile(g_personId);
 
@@ -1049,12 +1142,19 @@ void setup() {
   Serial.print("min RequiredQuietEpochs="); Serial.print(REQUIRED_SLEEP_EPOCHS);
   Serial.print(" HeatingDurationAfterOnset="); Serial.print(HEATING_DURATION_MS/60000UL);
   Serial.println("min");
-  Serial.print("# HR 캘리브레이션: 폐기 "); Serial.print(CALIB_DISCARD_MS/1000UL);
-  Serial.print("s + 수집 "); Serial.print(CALIB_COLLECT_MS/1000UL);
+  Serial.print("# 센서: start 전까지 정지, start 후 "); Serial.print(SENSOR_WARMUP_MS/1000UL);
+  Serial.println("s 워밍업(데이터 폐기, 히터 OFF)");
+  Serial.print("# HR 캘리브레이션: 워밍업 후 수집 "); Serial.print(CALIB_COLLECT_MS/1000UL);
   Serial.print("s, 입면기준 = 안정심박수 - "); Serial.print(HR_DROP_BPM,0);
   Serial.println(" BPM");
   Serial.print("# SessionTimeout="); Serial.print(SESSION_MAX_MS/60000UL);
-  Serial.println("min (미입면 시 기기 전원 종료)");
+  Serial.println("min (미입면 시 히터/센서 정지 후 기기 전원 종료)");
+#if KEEP_HEATING_AFTER_ONSET
+  Serial.print("# 입면 확정 시: "); Serial.print(HEATING_DURATION_MS/60000UL);
+  Serial.println("분 가온 유지 후 히터/센서 정지");
+#else
+  Serial.println("# 입면 확정 시: 즉시 히터/센서 정지 후 기기 전원 종료");
+#endif
   Serial.println("# cmds: id <name> | start | abort | set <c> | report | reset_profile | off | r");
 
   printCsvHeader();
@@ -1070,25 +1170,32 @@ void loop() {
   // --- 시작 버튼 (엣지 검출) ---
   static bool btnPrev = HIGH;
   bool btn = digitalRead(START_BTN_PIN);
-  if (btnPrev == HIGH && btn == LOW && sessionState == SESS_IDLE) startSession();
+  if (btnPrev == HIGH && btn == LOW
+      && (sessionState == SESS_IDLE || sessionState == SESS_OFF)) startSession();
   btnPrev = btn;
 
   // --- 제어 주기 (1초) ---
   if (now - lastControlMs >= CONTROL_PERIOD_MS) {
     lastControlMs = now;
 
-    float heaterC = readHeaterTempC();                     // NTC: 히터 표면 온도(안전감시용)
-    float skinC   = g_mlxOk ? mlx.readObjectTempC() : NAN; // MLX90614: 피부 온도(제어 목표)
+    // [변경 4] 센서 정지 중에는 온도도 측정하지 않는다.
+    //          워밍업(SESS_WARMUP) 중에는 읽기만 하고 안전 판정/PID 에는 쓰지 않는다.
+    bool accepted = sensorDataAccepted();
+    float heaterC = readHeaterTempC();                                        // NTC: 히터 표면(안전감시용)
+    float skinC   = (g_sensorsActive && g_mlxOk) ? mlx.readObjectTempC() : NAN; // MLX90614: 피부(제어 목표)
 
-    safetyState = evaluateSafety(skinC, heaterC, lastLoggedSkinC, lastLoggedHeaterC, safetyState, now);
+    if (accepted) {
+      safetyState = evaluateSafety(skinC, heaterC, lastLoggedSkinC, lastLoggedHeaterC, safetyState, now);
+    }
     handleSerial(skinC, heaterC);
 
     // 세션/입면 갱신
     updateSession(now);
 
-    // 제어 출력
+    // 제어 출력 (워밍업이 끝나 유효한 온도가 확보된 뒤에만 가열)
     int duty = 0;
-    bool heaterAllowed = (safetyState == STATE_NORMAL)
+    bool heaterAllowed = accepted
+                       && (safetyState == STATE_NORMAL)
                        && !g_preFaultCutoff                // 이상 온도 감시 중에는 가열 정지
                        && (sessionState == SESS_RUNNING || sessionState == SESS_COOLDOWN)
                        && (SETPOINT_C > 0);
@@ -1102,8 +1209,16 @@ void loop() {
     if (safetyState != STATE_NORMAL || g_preFaultCutoff) duty = 0;  // ★ 하드 컷오프 강제 ★
     pwmWrite(duty);
 
-    lastLoggedSkinC   = skinC;
-    lastLoggedHeaterC = heaterC;
+    if (accepted) {                 // 워밍업/정지 구간의 값은 다음 주기 비교에 쓰지 않는다
+      lastLoggedSkinC   = skinC;
+      lastLoggedHeaterC = heaterC;
+    }
+
+    // 세션이 없고 FAULT 도 해소된 상태면 센서를 정지시킨다
+    if (g_sensorsActive && safetyState == STATE_NORMAL
+        && (sessionState == SESS_IDLE || sessionState == SESS_OFF)) {
+      setSensorsActive(false);
+    }
 
     if (now - lastLogMs >= LOG_PERIOD_MS) {
       lastLogMs = now;

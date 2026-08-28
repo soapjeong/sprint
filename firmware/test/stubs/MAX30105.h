@@ -8,4 +8,6 @@ public:
   void setPulseAmplitudeRed(uint8_t);
   void setPulseAmplitudeGreen(uint8_t);
   long getIR();
+  void shutDown();
+  void wakeUp();
 };

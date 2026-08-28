@@ -91,7 +91,8 @@ class SerialCsvLogger:
             if not self._header_written:
                 # 파이썬이 알아서 CSV 첫 줄(헤더)을 만들어줍니다.
                 headers = ["시간(초)", "피부온도(C)", "히터온도(C)", "목표온도(C)", "PWM(%)", "심박수(BPM)",
-                           "안정심박(BPM)", "입면기준(BPM)", "안전상태", "세션상태", "연속수면(분)", "수면판정"]
+                           "안정심박(BPM)", "입면기준(BPM)", "센서전원", "안전상태", "세션상태",
+                           "연속수면(분)", "수면판정"]
                 self.csv_writer.writerow(headers)
                 self._header_written = True
                 self.csv_file.flush()
