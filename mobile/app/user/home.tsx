@@ -141,6 +141,8 @@ export default function UserHomeScreen() {
           ))}
           <Button label="ID·기기 다시 등록" variant="secondary" onPress={() => { signOut().then(() => router.replace('/')); }} />
         </Card>
+
+        <Button label="관리자 페이지" variant="secondary" onPress={() => router.push('/admin')} />
       </ScrollView>
     </Screen>
   );
