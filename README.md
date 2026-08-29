@@ -22,10 +22,9 @@ ESP32 기기, PC 브리지, 백엔드, 모바일 앱으로 구성된다.
 ## 빠른 시작
 
 ```bash
-# 1) 백엔드
+# 1) 백엔드 (레포 루트에서)
 pip install -r server/requirements.txt
-ADMIN_TOKEN=my-admin INGEST_API_KEY=my-key \
-  uvicorn server.app.main:app --host 0.0.0.0 --port 8000
+python server/run.py        # 앱에 입력할 서버 주소와 토큰을 출력해 준다
 
 # 2) 앱 (첫 화면에서 서버 주소 + 사용자 ID + 기기 등록)
 cd mobile && npm install && npx expo start

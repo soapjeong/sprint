@@ -12,7 +12,15 @@ ESP32 --USB--> serial_csv_logger.py --HTTP--> FastAPI --> SQLite
 
 ```bash
 pip install -r server/requirements.txt
-# 토큰은 반드시 바꿔서 실행할 것 (기본값은 개발용)
+python server/run.py            # 접속 주소·토큰을 출력하고 서버를 띄운다
+```
+
+`run.py` 는 실행 위치와 상관없이 동작한다(`python C:\Users\...\sprint\server\run.py` 도 가능).
+직접 uvicorn 을 쓰려면 **레포 루트에서** 실행해야 한다 — 다른 폴더에서 실행하면
+`ModuleNotFoundError: No module named 'server'` 가 난다.
+
+```bash
+cd <레포 루트>
 ADMIN_TOKEN=... INGEST_API_KEY=... \
   uvicorn server.app.main:app --host 0.0.0.0 --port 8000
 ```
