@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from . import db
 from .models import (
@@ -431,3 +431,51 @@ def admin_export_sessions(user_id: Optional[str] = None) -> PlainTextResponse:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def index() -> HTMLResponse:
+    """브라우저로 서버 주소를 열었을 때 보여주는 상태 페이지.
+
+    앱이 아니라 '서버가 살아있는지' 확인하는 용도. 앱 화면은 모바일에서 Expo 로 연다.
+    """
+    with db.session_scope() as conn:
+        users = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+        devices = conn.execute("SELECT COUNT(*) AS n FROM devices").fetchone()["n"]
+        sessions = conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"]
+    return HTMLResponse(f"""<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<title>DormX 백엔드</title>
+<style>
+  :root {{ color-scheme: light dark; }}
+  body {{ font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; margin: 0;
+         padding: 40px 24px; line-height: 1.6; }}
+  main {{ max-width: 640px; margin: 0 auto; }}
+  .ok {{ display: inline-block; padding: 4px 10px; border-radius: 999px;
+         background: #1baf7a; color: #fff; font-size: 13px; font-weight: 600; }}
+  code {{ background: rgba(128,128,128,.18); padding: 2px 6px; border-radius: 4px; }}
+  table {{ border-collapse: collapse; margin: 16px 0; }}
+  td {{ padding: 4px 16px 4px 0; }}
+  ol {{ padding-left: 20px; }}
+</style></head>
+<body><main>
+  <p><span class="ok">서버 실행 중</span></p>
+  <h1>DormX 백엔드</h1>
+  <p>이 페이지는 서버가 살아있는지 확인하는 용도입니다.
+     <strong>사용자·관리자 화면은 이 주소가 아니라 모바일 앱에서</strong> 보입니다.</p>
+  <table>
+    <tr><td>등록 사용자</td><td><strong>{users}</strong> 명</td></tr>
+    <tr><td>등록 기기</td><td><strong>{devices}</strong> 대</td></tr>
+    <tr><td>누적 세션</td><td><strong>{sessions}</strong> 회</td></tr>
+  </table>
+  <h2>앱 여는 순서</h2>
+  <ol>
+    <li>PC 에서 <code>cd mobile</code> → <code>npm install</code> → <code>npx expo start</code></li>
+    <li>폰에 <b>Expo Go</b> 앱을 설치하고 터미널의 QR 코드를 스캔</li>
+    <li>앱 첫 화면 <b>서버 주소</b> 칸에 이 PC 의 주소(<code>http://[PC의 LAN IP]:8000</code>)를 입력
+        — 주소는 서버를 켠 터미널 맨 위에 찍혀 있습니다</li>
+  </ol>
+  <p><a href="/docs">API 문서 열기</a></p>
+</main></body></html>""")
