@@ -41,9 +41,8 @@ ADMIN_TOKEN=... INGEST_API_KEY=... \
   남의 ID 를 알아도 403 이다. 비밀번호는 scrypt 로 해시해 저장한다(평문 저장 없음).
 - 로그인 실패 응답은 "ID 없음"과 "비밀번호 틀림"을 구분하지 않는다(계정 열거 방지).
 - 기본 토큰(`dev-admin-token` / `dev-ingest-key`)으로는 서버가 기동을 거부한다.
-  로컬 개발만 `SLEEP_ALLOW_DEV_TOKENS=1` 로 허용되며 `server/run.py` 가 자동으로 켠다.
-
-클라우드 배포는 [DEPLOY.md](DEPLOY.md) 참고.
+  `server/run.py` 로 실행하면 로컬 개발로 보고 자동 허용한다(`SLEEP_ALLOW_DEV_TOKENS=1`).
+  같은 Wi-Fi 를 여럿이 쓰는 곳이라면 토큰을 직접 정해서 실행하는 편이 안전하다.
 
 ## 엔드포인트
 

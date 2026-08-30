@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "@expo/metro-runtime": "~57.0.14",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "expo": "~57.0.18",
     "expo-build-properties": "~57.0.15",
     "expo-constants": "~57.0.16",
+    "expo-dev-client": "~57.0.16",
     "expo-linking": "~57.0.8",
     "expo-router": "~57.0.17",
     "expo-status-bar": "~57.0.1",
@@ -15,7 +17,8 @@
     "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
-    "react-native-svg": "^15.15.4"
+    "react-native-svg": "^15.15.4",
+    "react-native-web": "^0.21.2"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
@@ -30,7 +33,11 @@
     "start:tunnel": "expo start --tunnel",
     "build:android:preview": "eas build --platform android --profile preview",
     "build:android": "eas build --platform android --profile production",
-    "build:ios": "eas build --platform ios --profile production"
+    "build:ios": "eas build --platform ios --profile production",
+    "android:local": "expo run:android",
+    "ios:local": "expo run:ios",
+    "start:dev-client": "expo start --dev-client",
+    "build:dev:android": "eas build --profile development --platform android"
   },
   "private": true
 }

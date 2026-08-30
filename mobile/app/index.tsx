@@ -68,8 +68,17 @@ export default function OnboardingScreen() {
         mode === 'create'
           ? await api.signUp(serverUrl, id, name.trim(), password)
           : await api.logIn(serverUrl, id, password);
-      await update({ serverUrl: serverUrl.trim(), userId: id, userToken: auth.access_token });
+      const base = serverUrl.trim();
+      await update({ serverUrl: base, userId: id, userToken: auth.access_token });
       setPassword('');
+
+      // 이미 등록해 둔 기기가 있으면(다른 폰에서 로그인한 경우) 다시 고를 필요가 없다
+      const mine = await api.listDevices(base, auth.access_token, id).catch(() => []);
+      if (mine.length > 0) {
+        await update({ serverUrl: base, userId: id, userToken: auth.access_token, deviceId: mine[0].device_id });
+        router.replace('/user/home');
+        return;
+      }
       setStep('device');
     } catch (e) {
       const err = e as ApiError;

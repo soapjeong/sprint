@@ -2,16 +2,54 @@
 
 사용자 페이지와 관리자 페이지를 한 앱에서 운영한다.
 
-## 개발 중 실행 (Expo Go)
+## 개발 중 미리보기 — 네 가지 방법
 
 ```bash
 cd mobile
 npm install
-npx expo start          # Expo Go 앱으로 QR 스캔
-npx expo start --tunnel # 같은 Wi-Fi 인데도 연결이 안 될 때
 ```
 
-Expo Go 는 "데모 전용"이 아니라 **개발 중 미리보기 도구**다. 아래 EAS 빌드로 만든 결과물이
+### 1. 웹 브라우저 (가장 빠름, 설치·계정 불필요)
+
+```bash
+npm run web        # http://localhost:8081 이 열린다
+```
+
+PC 브라우저에서 앱 화면을 그대로 확인한다. React Native Web 으로 같은 코드를 렌더링하므로
+화면 흐름·API 연동·차트를 전부 볼 수 있다. 폰 화면처럼 보려면 브라우저 개발자도구의
+기기 모드(F12 → Ctrl+Shift+M)를 켠다.
+네이티브 전용 기능(딥슬립 연동 등)은 없지만 이 앱은 서버 API 만 쓰므로 차이가 거의 없다.
+
+### 2. Android 에뮬레이터 / USB 연결 실기기 (실제 네이티브 앱)
+
+Android Studio 설치 후:
+
+```bash
+npm run android:local     # expo run:android — 네이티브 앱을 직접 빌드해 설치
+```
+
+Expo Go 를 거치지 않고 이 프로젝트만의 앱이 설치된다. 첫 빌드는 10분 정도 걸리고,
+이후에는 코드를 고치면 자동 반영된다. macOS 라면 `npm run ios:local`.
+
+### 3. 개발 빌드(dev client) — 내 폰에 설치되는 전용 개발 앱
+
+```bash
+npm run build:dev:android    # eas build --profile development
+# 나온 링크로 APK 설치 후
+npm run start:dev-client
+```
+
+Expo Go 대신 **이 프로젝트 전용 개발 앱**이 폰에 설치된다. Expo 계정이 필요하고
+빌드는 클라우드에서 돌아간다(무료 큐 사용 가능).
+
+### 4. Expo Go (설치만 하면 되지만 네트워크를 탄다)
+
+```bash
+npm start                 # QR 스캔
+npm run start:tunnel      # 같은 Wi-Fi 인데 연결이 안 될 때(공유기가 기기 간 통신을 막는 경우)
+```
+
+Expo Go 는 "데모 전용"이 아니라 개발 중 미리보기 도구다. 아래 EAS 빌드로 만든 결과물이
 스토어에 올리는 실제 앱이며, 코드는 그대로 쓴다.
 
 ## 배포용 앱 빌드 (EAS)
@@ -30,8 +68,7 @@ npm run build:ios               # App Store 용 (Apple 개발자 계정 필요)
 `expo-build-properties` 로 안드로이드 `usesCleartextTraffic` 을 켜 두어 배포 빌드에서도
 `http://` 로컬 서버에 붙는다. 서버를 HTTPS 로 올리면 이 설정은 지우는 편이 안전하다.
 
-첫 화면에서 서버 주소를 입력한다 — 로컬은 PC 의 LAN IP(`http://192.168.0.x:8000`),
-클라우드에 배포했다면 `https://<앱이름>.fly.dev`.
+첫 화면에서 서버 주소를 PC 의 LAN IP(`http://192.168.0.x:8000`)로 입력한다.
 `app.json` 의 `extra.defaultServerUrl` 을 바꾸면 기본값이 바뀐다.
 
 ## 화면 구성
