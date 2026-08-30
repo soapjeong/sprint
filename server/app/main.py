@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
@@ -22,11 +22,13 @@ from . import db
 from .models import (
     AdminUserRow,
     AnnounceResult,
+    AuthResult,
     DeviceAnnounce,
     DeviceOut,
     DeviceRegister,
     EventIn,
     IngestResult,
+    LoginRequest,
     PendingDevice,
     SampleBatch,
     SessionOut,
@@ -36,11 +38,29 @@ from .models import (
     UserOut,
     UserSummary,
 )
-from .security import require_admin, require_ingest_key
+from .security import (
+    check_startup_config,
+    dev_tokens_allowed,
+    hash_password,
+    new_access_token,
+    require_admin,
+    require_ingest_key,
+    verify_password,
+)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     db.init_db()
+    problems = check_startup_config()
+    if problems:
+        message = " ".join(problems)
+        if not dev_tokens_allowed():
+            # 인터넷에 공개된 서버가 기본 토큰으로 뜨는 것을 막는다.
+            raise RuntimeError(
+                f"{message} ADMIN_TOKEN / INGEST_API_KEY 환경변수를 설정하세요. "
+                "(로컬 개발이면 SLEEP_ALLOW_DEV_TOKENS=1)"
+            )
+        print(f"[경고] {message} 로컬 개발 모드로 실행합니다.")
     yield
 
 
@@ -62,6 +82,34 @@ LATE_SAMPLE_WINDOW_S = 600
 # ---------------------------------------------------------------- helpers
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {k: row[k] for k in row.keys()}
+
+
+def current_user(x_user_token: str = Header(default="")) -> str:
+    """X-User-Token 을 사용자 ID 로 바꾼다. 없거나 모르는 토큰이면 401."""
+    if not x_user_token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "로그인이 필요합니다.")
+    with db.session_scope() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM auth_tokens WHERE token=?", (x_user_token,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "로그인이 만료되었습니다. 다시 로그인하세요.")
+        conn.execute("UPDATE auth_tokens SET last_used_at=? WHERE token=?", (db.now_iso(), x_user_token))
+        return str(row["user_id"])
+
+
+def _require_self(caller: str, user_id: str) -> None:
+    if caller != user_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "다른 사용자의 데이터에는 접근할 수 없습니다.")
+
+
+def _issue_token(conn: sqlite3.Connection, user_id: str) -> str:
+    token = new_access_token()
+    conn.execute(
+        "INSERT INTO auth_tokens(token, user_id, created_at) VALUES(?,?,?)",
+        (token, user_id, db.now_iso()),
+    )
+    return token
 
 
 def _get_user(conn: sqlite3.Connection, user_id: str) -> sqlite3.Row:
@@ -113,28 +161,58 @@ def _value(values: list[float], idx: int) -> Optional[float]:
 
 
 # ---------------------------------------------------------------- 사용자 / 기기 등록
-@app.post("/api/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def create_user(payload: UserCreate) -> UserOut:
-    """첫 화면에서 사용자 ID를 등록한다. 이미 있으면 409."""
+@app.post("/api/users", response_model=AuthResult, status_code=status.HTTP_201_CREATED)
+def create_user(payload: UserCreate) -> AuthResult:
+    """첫 화면에서 사용자 ID와 비밀번호를 등록한다. 이미 있으면 409."""
     with db.session_scope() as conn:
         if conn.execute("SELECT 1 FROM users WHERE user_id=?", (payload.user_id,)).fetchone():
             raise HTTPException(status.HTTP_409_CONFLICT, "이미 사용 중인 ID 입니다.")
         created = db.now_iso()
+        salt, digest = hash_password(payload.password)
         conn.execute(
-            "INSERT INTO users(user_id, name, created_at) VALUES(?,?,?)",
-            (payload.user_id, payload.name, created),
+            "INSERT INTO users(user_id, name, created_at, password_salt, password_hash)"
+            " VALUES(?,?,?,?,?)",
+            (payload.user_id, payload.name, created, salt, digest),
         )
-        return UserOut(user_id=payload.user_id, name=payload.name, created_at=created)
+        token = _issue_token(conn, payload.user_id)
+        return AuthResult(
+            user=UserOut(user_id=payload.user_id, name=payload.name, created_at=created),
+            access_token=token,
+        )
+
+
+@app.post("/api/auth/login", response_model=AuthResult)
+def login(payload: LoginRequest) -> AuthResult:
+    with db.session_scope() as conn:
+        row = conn.execute("SELECT * FROM users WHERE user_id=?", (payload.user_id,)).fetchone()
+        # ID 가 있는지 없는지 알려주지 않는다(계정 열거 방지)
+        if row is None or not row["password_hash"] or not verify_password(
+            payload.password, row["password_salt"], row["password_hash"]
+        ):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ID 또는 비밀번호가 올바르지 않습니다.")
+        token = _issue_token(conn, payload.user_id)
+        return AuthResult(
+            user=UserOut(user_id=row["user_id"], name=row["name"], created_at=row["created_at"]),
+            access_token=token,
+        )
+
+
+@app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(x_user_token: str = Header(default="")) -> None:
+    with db.session_scope() as conn:
+        conn.execute("DELETE FROM auth_tokens WHERE token=?", (x_user_token,))
 
 
 @app.get("/api/users/{user_id}", response_model=UserOut)
-def get_user(user_id: str) -> UserOut:
+def get_user(user_id: str, caller: str = Depends(current_user)) -> UserOut:
+    _require_self(caller, user_id)
     with db.session_scope() as conn:
         return UserOut(**_row_to_dict(_get_user(conn, user_id)))
 
 
 @app.post("/api/devices", response_model=DeviceOut, status_code=status.HTTP_201_CREATED)
-def register_device(payload: DeviceRegister) -> DeviceOut:
+def register_device(payload: DeviceRegister, caller: str = Depends(current_user)) -> DeviceOut:
+    _require_self(caller, payload.user_id)
     """기기 등록. 같은 기기를 다시 등록하면 소유자/별칭을 갱신한다."""
     with db.session_scope() as conn:
         _get_user(conn, payload.user_id)
@@ -157,7 +235,10 @@ def register_device(payload: DeviceRegister) -> DeviceOut:
 
 
 @app.get("/api/devices/pending", response_model=list[PendingDevice])
-def pending_devices(minutes: int = Query(default=120, ge=1, le=1440)) -> list[PendingDevice]:
+def pending_devices(
+    minutes: int = Query(default=120, ge=1, le=1440),
+    caller: str = Depends(current_user),
+) -> list[PendingDevice]:
     """아직 등록되지 않은 채 신호를 보내온 기기 목록.
 
     기기 ID 는 칩 MAC 에서 만들어져 사람이 외울 수 없으므로, 앱은 이 목록에서 골라 등록한다.
@@ -172,7 +253,8 @@ def pending_devices(minutes: int = Query(default=120, ge=1, le=1440)) -> list[Pe
 
 
 @app.get("/api/users/{user_id}/devices", response_model=list[DeviceOut])
-def list_devices(user_id: str) -> list[DeviceOut]:
+def list_devices(user_id: str, caller: str = Depends(current_user)) -> list[DeviceOut]:
+    _require_self(caller, user_id)
     with db.session_scope() as conn:
         _get_user(conn, user_id)
         rows = conn.execute(
@@ -182,9 +264,10 @@ def list_devices(user_id: str) -> list[DeviceOut]:
 
 
 @app.delete("/api/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
-def unregister_device(device_id: str) -> None:
+def unregister_device(device_id: str, caller: str = Depends(current_user)) -> None:
     with db.session_scope() as conn:
-        _get_device(conn, device_id)
+        device = _get_device(conn, device_id)
+        _require_self(caller, str(device["user_id"]))
         conn.execute("DELETE FROM devices WHERE device_id=?", (device_id,))
 
 
@@ -198,14 +281,20 @@ def _session_rows(conn: sqlite3.Connection, user_id: str, limit: int) -> list[Se
 
 
 @app.get("/api/users/{user_id}/sessions", response_model=list[SessionOut])
-def user_sessions(user_id: str, limit: int = Query(default=30, ge=1, le=200)) -> list[SessionOut]:
+def user_sessions(
+    user_id: str,
+    limit: int = Query(default=30, ge=1, le=200),
+    caller: str = Depends(current_user),
+) -> list[SessionOut]:
+    _require_self(caller, user_id)
     with db.session_scope() as conn:
         _get_user(conn, user_id)
         return _session_rows(conn, user_id, limit)
 
 
 @app.get("/api/users/{user_id}/summary", response_model=UserSummary)
-def user_summary(user_id: str) -> UserSummary:
+def user_summary(user_id: str, caller: str = Depends(current_user)) -> UserSummary:
+    _require_self(caller, user_id)
     """사용자 홈 화면용 집계: 세션 수, 평균/최단 SOL, 온도별 성적."""
     with db.session_scope() as conn:
         user = _get_user(conn, user_id)
@@ -263,11 +352,16 @@ def user_summary(user_id: str) -> UserSummary:
 
 
 @app.get("/api/sessions/{session_id}")
-def session_detail(session_id: int, samples: int = Query(default=600, ge=0, le=5000)) -> dict[str, Any]:
+def session_detail(
+    session_id: int,
+    samples: int = Query(default=600, ge=0, le=5000),
+    caller: str = Depends(current_user),
+) -> dict[str, Any]:
     with db.session_scope() as conn:
         row = conn.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
         if row is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "세션을 찾을 수 없습니다.")
+        _require_self(caller, str(row["user_id"]))
         sample_rows = conn.execute(
             "SELECT * FROM samples WHERE session_id=? ORDER BY device_ms LIMIT ?",
             (session_id, samples),
@@ -283,12 +377,15 @@ def session_detail(session_id: int, samples: int = Query(default=600, ge=0, le=5
 
 
 @app.post("/api/sessions/{session_id}/review", response_model=SessionOut)
-def review_session(session_id: int, payload: SessionReview) -> SessionOut:
+def review_session(
+    session_id: int, payload: SessionReview, caller: str = Depends(current_user)
+) -> SessionOut:
     """아침에 남기는 수면 평가(별점 + 특이사항). 다시 보내면 덮어쓴다."""
     with db.session_scope() as conn:
         row = conn.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
         if row is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "세션을 찾을 수 없습니다.")
+        _require_self(caller, str(row["user_id"]))
         conn.execute(
             "UPDATE sessions SET rating=?, note_code=?, note_text=?, reviewed_at=? WHERE session_id=?",
             (payload.rating, payload.note_code, payload.note_text.strip(), db.now_iso(), session_id),

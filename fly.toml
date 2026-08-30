@@ -1,0 +1,33 @@
+# Fly.io 배포 설정 — SQLite 를 영구 볼륨(/data)에 두고 HTTPS 로 서비스한다.
+#   fly launch --no-deploy --copy-config      (앱 이름/리전 확인)
+#   fly volumes create dormx_data --size 1 --region nrt
+#   fly secrets set ADMIN_TOKEN=... INGEST_API_KEY=...
+#   fly deploy
+app = "dormx-sleep-api"
+primary_region = "nrt"          # 도쿄 — 한국에서 지연이 가장 낮다
+
+[build]
+
+[env]
+  PORT = "8080"
+  SLEEP_DB_PATH = "/data/sleep.db"
+
+# SQLite 는 여러 머신이 동시에 쓰면 깨지므로 머신 1대로 고정한다.
+[[mounts]]
+  source = "dormx_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"   # 요청이 없으면 잠들고(비용 0에 가깝게)
+  auto_start_machines = true       # 요청이 오면 자동으로 깨어난다
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/health"

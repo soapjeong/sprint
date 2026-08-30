@@ -22,6 +22,7 @@ export default function OnboardingScreen() {
   const [serverUrl, setServerUrl] = useState(settings.serverUrl);
   const [userId, setUserId] = useState('');
   const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [deviceLabel, setDeviceLabel] = useState('');
   const [busy, setBusy] = useState<null | 'user' | 'device' | 'scan'>(null);
@@ -33,14 +34,14 @@ export default function OnboardingScreen() {
   useEffect(() => {
     if (!ready) return;
     setServerUrl(settings.serverUrl);
-    if (settings.userId) {
+    if (settings.userId && settings.userToken) {
       setUserId(settings.userId);
       setStep('device');
     }
-    if (settings.userId && settings.deviceId) {
+    if (settings.userId && settings.userToken && settings.deviceId) {
       router.replace('/user/home');
     }
-  }, [ready, settings.userId, settings.deviceId, settings.serverUrl, router]);
+  }, [ready, settings.userId, settings.userToken, settings.deviceId, settings.serverUrl, router]);
 
   if (!ready) {
     return (
@@ -56,24 +57,26 @@ export default function OnboardingScreen() {
       setError('ID는 영문/숫자와 . _ - 만 사용해 2~32자로 입력하세요.');
       return;
     }
+    if (password.length < 8) {
+      setError('비밀번호는 8자 이상이어야 합니다.');
+      return;
+    }
     setBusy('user');
     try {
       const id = userId.trim();
-      if (mode === 'create') {
-        await api.createUser(serverUrl, id, name.trim());
-      } else {
-        await api.getUser(serverUrl, id);
-      }
-      await update({ serverUrl: serverUrl.trim(), userId: id });
+      const auth =
+        mode === 'create'
+          ? await api.signUp(serverUrl, id, name.trim(), password)
+          : await api.logIn(serverUrl, id, password);
+      await update({ serverUrl: serverUrl.trim(), userId: id, userToken: auth.access_token });
+      setPassword('');
       setStep('device');
     } catch (e) {
       const err = e as ApiError;
       setError(
         err.status === 409
-          ? '이미 등록된 ID 입니다. "기존 ID로 계속"을 눌러주세요.'
-          : err.status === 404
-            ? '등록되지 않은 ID 입니다. "새 ID 등록"을 눌러주세요.'
-            : err.message,
+          ? '이미 등록된 ID 입니다. "기존 ID로 로그인"을 눌러주세요.'
+          : err.message,
       );
     } finally {
       setBusy(null);
@@ -85,7 +88,7 @@ export default function OnboardingScreen() {
     setError('');
     setBusy('scan');
     try {
-      const list = await api.pendingDevices(serverUrl);
+      const list = await api.pendingDevices(serverUrl, settings.userToken ?? '');
       setFound(list);
       if (list.length === 1) setDeviceId(list[0].device_id);
       if (list.length === 0) {
@@ -106,7 +109,13 @@ export default function OnboardingScreen() {
     }
     setBusy('device');
     try {
-      await api.registerDevice(serverUrl, deviceId.trim(), userId.trim(), deviceLabel.trim());
+      await api.registerDevice(
+        serverUrl,
+        settings.userToken ?? '',
+        deviceId.trim(),
+        userId.trim(),
+        deviceLabel.trim(),
+      );
       await update({ deviceId: deviceId.trim() });
       router.replace('/user/home');
     } catch (e) {
@@ -151,13 +160,21 @@ export default function OnboardingScreen() {
             {step === 'user' ? (
               <>
                 <Field label="이름(선택)" value={name} onChangeText={setName} placeholder="조민서" />
+                <Field
+                  label="비밀번호"
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="8자 이상"
+                  secureTextEntry
+                  hint="내 수면 기록을 나만 보기 위한 비밀번호입니다."
+                />
                 <Row>
                   <View style={{ flex: 1 }}>
                     <Button label="새 ID 등록" onPress={() => submitUser('create')} loading={busy === 'user'} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Button
-                      label="기존 ID로 계속"
+                      label="기존 ID로 로그인"
                       variant="secondary"
                       onPress={() => submitUser('login')}
                       loading={busy === 'user'}

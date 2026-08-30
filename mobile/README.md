@@ -30,7 +30,8 @@ npm run build:ios               # App Store 용 (Apple 개발자 계정 필요)
 `expo-build-properties` 로 안드로이드 `usesCleartextTraffic` 을 켜 두어 배포 빌드에서도
 `http://` 로컬 서버에 붙는다. 서버를 HTTPS 로 올리면 이 설정은 지우는 편이 안전하다.
 
-첫 화면에서 서버 주소를 PC의 LAN IP(`http://192.168.0.x:8000`)로 입력한다.
+첫 화면에서 서버 주소를 입력한다 — 로컬은 PC 의 LAN IP(`http://192.168.0.x:8000`),
+클라우드에 배포했다면 `https://<앱이름>.fly.dev`.
 `app.json` 의 `extra.defaultServerUrl` 을 바꾸면 기본값이 바뀐다.
 
 ## 화면 구성
@@ -44,7 +45,7 @@ app/
   admin/[userId].tsx     관리자 — 특정 ID의 기기·세션·이벤트 전체
 ```
 
-- 사용자 ID / 기기 ID / 서버 주소 / 관리자 토큰은 `AsyncStorage` 에 저장되어
+- 가입/로그인 시 받은 접근 토큰과 사용자 ID / 기기 ID / 서버 주소 / 관리자 토큰이 `AsyncStorage` 에 저장되어
   다음 실행 때는 첫 화면을 건너뛰고 사용자 페이지로 바로 들어간다.
 - 기기 ID 는 ESP32 칩의 MAC 에서 자동 생성된다. 첫 화면에서 **연결된 기기 찾기** 를 누르면
   방금 신호를 보낸 기기가 목록에 뜨고, 눌러서 등록한다(직접 입력도 가능).

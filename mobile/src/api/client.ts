@@ -1,12 +1,12 @@
 import type {
   AdminUserDetail,
   AdminUserRow,
+  AuthResult,
   Device,
   NoteCode,
   PendingDevice,
   Session,
   SessionDetail,
-  User,
   UserSummary,
 } from './types';
 
@@ -27,7 +27,7 @@ function normalizeBase(baseUrl: string): string {
 async function request<T>(
   baseUrl: string,
   path: string,
-  options: { method?: string; body?: unknown; adminToken?: string } = {},
+  options: { method?: string; body?: unknown; adminToken?: string; userToken?: string | null } = {},
 ): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -37,6 +37,7 @@ async function request<T>(
       headers: {
         'Content-Type': 'application/json',
         ...(options.adminToken ? { 'X-Admin-Token': options.adminToken } : {}),
+        ...(options.userToken ? { 'X-User-Token': options.userToken } : {}),
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: controller.signal,
@@ -63,29 +64,42 @@ async function request<T>(
 export const api = {
   health: (base: string) => request<{ status: string }>(base, '/api/health'),
 
-  // --- 첫 화면: 사용자 ID / 기기 등록 ---
-  createUser: (base: string, user_id: string, name: string) =>
-    request<User>(base, '/api/users', { method: 'POST', body: { user_id, name } }),
-  getUser: (base: string, userId: string) => request<User>(base, `/api/users/${userId}`),
-  registerDevice: (base: string, device_id: string, user_id: string, label: string) =>
-    request<Device>(base, '/api/devices', { method: 'POST', body: { device_id, user_id, label } }),
-  listDevices: (base: string, userId: string) => request<Device[]>(base, `/api/users/${userId}/devices`),
+  // --- 첫 화면: 가입 / 로그인 / 기기 등록 ---
+  signUp: (base: string, user_id: string, name: string, password: string) =>
+    request<AuthResult>(base, '/api/users', { method: 'POST', body: { user_id, name, password } }),
+  logIn: (base: string, user_id: string, password: string) =>
+    request<AuthResult>(base, '/api/auth/login', { method: 'POST', body: { user_id, password } }),
+  logOut: (base: string, userToken: string) =>
+    request<null>(base, '/api/auth/logout', { method: 'POST', userToken }),
+  registerDevice: (base: string, userToken: string, device_id: string, user_id: string, label: string) =>
+    request<Device>(base, '/api/devices', { method: 'POST', userToken, body: { device_id, user_id, label } }),
+  listDevices: (base: string, userToken: string, userId: string) =>
+    request<Device[]>(base, `/api/users/${userId}/devices`, { userToken }),
   /** 등록되지 않은 채 신호를 보내온 기기들 — 기기 ID 는 칩 MAC 이라 목록에서 고른다 */
-  pendingDevices: (base: string, minutes = 180) =>
-    request<PendingDevice[]>(base, `/api/devices/pending?minutes=${minutes}`),
-  unregisterDevice: (base: string, deviceId: string) =>
-    request<null>(base, `/api/devices/${deviceId}`, { method: 'DELETE' }),
+  pendingDevices: (base: string, userToken: string, minutes = 180) =>
+    request<PendingDevice[]>(base, `/api/devices/pending?minutes=${minutes}`, { userToken }),
+  unregisterDevice: (base: string, userToken: string, deviceId: string) =>
+    request<null>(base, `/api/devices/${deviceId}`, { method: 'DELETE', userToken }),
 
   // --- 사용자 페이지 ---
-  summary: (base: string, userId: string) => request<UserSummary>(base, `/api/users/${userId}/summary`),
-  sessions: (base: string, userId: string, limit = 30) =>
-    request<Session[]>(base, `/api/users/${userId}/sessions?limit=${limit}`),
-  sessionDetail: (base: string, sessionId: number) =>
-    request<SessionDetail>(base, `/api/sessions/${sessionId}`),
+  summary: (base: string, userToken: string, userId: string) =>
+    request<UserSummary>(base, `/api/users/${userId}/summary`, { userToken }),
+  sessions: (base: string, userToken: string, userId: string, limit = 30) =>
+    request<Session[]>(base, `/api/users/${userId}/sessions?limit=${limit}`, { userToken }),
+  sessionDetail: (base: string, userToken: string, sessionId: number) =>
+    request<SessionDetail>(base, `/api/sessions/${sessionId}`, { userToken }),
   /** 아침 수면 평가(별점 + 특이사항) */
-  reviewSession: (base: string, sessionId: number, rating: number, note_code: NoteCode, note_text = '') =>
+  reviewSession: (
+    base: string,
+    userToken: string,
+    sessionId: number,
+    rating: number,
+    note_code: NoteCode,
+    note_text = '',
+  ) =>
     request<Session>(base, `/api/sessions/${sessionId}/review`, {
       method: 'POST',
+      userToken,
       body: { rating, note_code, note_text },
     }),
 

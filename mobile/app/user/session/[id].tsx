@@ -33,12 +33,12 @@ export default function SessionDetailScreen() {
   useEffect(() => {
     (async () => {
       try {
-        setDetail(await api.sessionDetail(settings.serverUrl, Number(id)));
+        setDetail(await api.sessionDetail(settings.serverUrl, settings.userToken ?? '', Number(id)));
       } catch (e) {
         setError((e as ApiError).message);
       }
     })();
-  }, [id, settings.serverUrl]);
+  }, [id, settings.serverUrl, settings.userToken]);
 
   if (error) {
     return (

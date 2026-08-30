@@ -100,25 +100,30 @@ def test_replay_uploads_events_and_samples(captured_upload):
 def test_uploaded_payloads_are_accepted_by_server(tmp_path, monkeypatch, captured_upload):
     """브리지가 만든 페이로드를 그대로 서버에 넣어 세션이 완성되는지 확인."""
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "e2e.db"))
+    monkeypatch.setenv("SLEEP_ALLOW_DEV_TOKENS", "1")
     db.init_db(str(tmp_path / "e2e.db"))
     with TestClient(app) as client:
-        client.post("/api/users", json={"user_id": "sub01", "name": "테스터"})
+        signup = client.post(
+            "/api/users", json={"user_id": "sub01", "name": "테스터", "password": "sleep-pass-1"}
+        )
+        headers = {"X-User-Token": signup.json()["access_token"]}
         client.post(
             "/api/devices",
+            headers=headers,
             json={"device_id": "DORMX-246F28AABBCC", "user_id": "sub01", "label": "침대"},
         )
         for path, payload in captured_upload:
             r = client.post("/api" + path.split("/api", 1)[1], headers={"X-API-Key": "dev-ingest-key"}, json=payload)
             assert r.status_code == 200, r.text
 
-        summary = client.get("/api/users/sub01/summary").json()
+        summary = client.get("/api/users/sub01/summary", headers=headers).json()
         assert summary["session_count"] == 1
         assert summary["onset_count"] == 1
         assert summary["best_sol_min"] == 24.5
         assert summary["best_temp_c"] == 39.0
 
         session_id = summary["recent_sessions"][0]["session_id"]
-        detail = client.get(f"/api/sessions/{session_id}").json()
+        detail = client.get(f"/api/sessions/{session_id}", headers=headers).json()
         assert detail["session"]["resting_bpm"] == 66.0
         assert detail["session"]["threshold_bpm"] == 56.0
         assert detail["session"]["ended_at"] is not None

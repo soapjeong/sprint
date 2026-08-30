@@ -18,10 +18,21 @@ PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS users (
-    user_id     TEXT PRIMARY KEY,
-    name        TEXT NOT NULL DEFAULT '',
-    created_at  TEXT NOT NULL
+    user_id       TEXT PRIMARY KEY,
+    name          TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    password_salt TEXT NOT NULL DEFAULT '',
+    password_hash TEXT NOT NULL DEFAULT ''
 );
+
+-- 로그인 후 앱이 보관하는 접근 토큰(기기마다 하나). 로그아웃하면 지운다.
+CREATE TABLE IF NOT EXISTS auth_tokens (
+    token      TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_auth_user ON auth_tokens(user_id);
 
 CREATE TABLE IF NOT EXISTS devices (
     device_id     TEXT PRIMARY KEY,
@@ -101,6 +112,10 @@ CREATE TABLE IF NOT EXISTS pending_devices (
 
 # 기존 DB 파일에 나중에 추가된 컬럼(구버전 DB 호환)
 MIGRATIONS: dict[str, dict[str, str]] = {
+    "users": {
+        "password_salt": "TEXT NOT NULL DEFAULT ''",
+        "password_hash": "TEXT NOT NULL DEFAULT ''",
+    },
     "sessions": {
         "rating": "INTEGER",
         "note_code": "TEXT",

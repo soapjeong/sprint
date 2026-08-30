@@ -7,6 +7,8 @@ const KEY = 'dormx.settings.v1';
 export type Settings = {
   serverUrl: string;
   userId: string | null;
+  /** 로그인 후 서버가 준 접근 토큰 */
+  userToken: string | null;
   deviceId: string | null;
   adminToken: string | null;
 };
@@ -15,7 +17,13 @@ const defaultServerUrl =
   (Constants.expoConfig?.extra as { defaultServerUrl?: string } | undefined)?.defaultServerUrl ??
   'http://localhost:8000';
 
-const initial: Settings = { serverUrl: defaultServerUrl, userId: null, deviceId: null, adminToken: null };
+const initial: Settings = {
+  serverUrl: defaultServerUrl,
+  userId: null,
+  userToken: null,
+  deviceId: null,
+  adminToken: null,
+};
 
 type Ctx = {
   settings: Settings;

@@ -1,5 +1,8 @@
 export type User = { user_id: string; name: string; created_at: string };
 
+/** 가입/로그인 결과 — access_token 을 저장해 이후 요청 헤더에 싣는다 */
+export type AuthResult = { user: User; access_token: string };
+
 export type Device = {
   device_id: string;
   user_id: string;

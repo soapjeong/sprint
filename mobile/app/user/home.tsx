@@ -24,16 +24,23 @@ export default function UserHomeScreen() {
   const [reviewError, setReviewError] = useState('');
 
   const load = useCallback(async () => {
-    if (!settings.userId) return;
+    if (!settings.userId || !settings.userToken) return;
     setError('');
     try {
-      setSummary(await api.summary(settings.serverUrl, settings.userId));
+      setSummary(await api.summary(settings.serverUrl, settings.userToken, settings.userId));
     } catch (e) {
-      setError((e as ApiError).message);
+      const err = e as ApiError;
+      if (err.status === 401) {
+        // 토큰이 만료됐으면 첫 화면으로 돌려보낸다
+        await signOut();
+        router.replace('/');
+        return;
+      }
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [settings.serverUrl, settings.userId]);
+  }, [settings.serverUrl, settings.userToken, settings.userId, signOut, router]);
 
   useFocusEffect(
     useCallback(() => {
@@ -47,7 +54,14 @@ export default function UserHomeScreen() {
     setReviewError('');
     setReviewing(true);
     try {
-      await api.reviewSession(settings.serverUrl, pending.session_id, rating, note, text);
+      await api.reviewSession(
+        settings.serverUrl,
+        settings.userToken ?? '',
+        pending.session_id,
+        rating,
+        note,
+        text,
+      );
       await load();
     } catch (e) {
       setReviewError((e as ApiError).message);
@@ -176,7 +190,21 @@ export default function UserHomeScreen() {
               <Caption>{`마지막 통신 ${formatDateTime(d.last_seen_at)}`}</Caption>
             </View>
           ))}
-          <Button label="ID·기기 다시 등록" variant="secondary" onPress={() => { signOut().then(() => router.replace('/')); }} />
+          <Button
+            label="로그아웃 · 다시 등록"
+            variant="secondary"
+            onPress={async () => {
+              if (settings.userToken) {
+                try {
+                  await api.logOut(settings.serverUrl, settings.userToken);
+                } catch {
+                  // 서버에 못 알려도 로컬 로그아웃은 진행한다
+                }
+              }
+              await signOut();
+              router.replace('/');
+            }}
+          />
         </Card>
 
         <Button label="관리자 페이지" variant="secondary" onPress={() => router.push('/admin')} />

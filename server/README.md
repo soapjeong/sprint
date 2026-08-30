@@ -31,13 +31,19 @@ ADMIN_TOKEN=... INGEST_API_KEY=... \
 
 ## 인증
 
-| 대상 | 헤더 | 환경변수 |
-|------|------|----------|
-| 시리얼 브리지 업로드 | `X-API-Key` | `INGEST_API_KEY` |
-| 관리자 조회 | `X-Admin-Token` | `ADMIN_TOKEN` |
-| 사용자 조회 | 없음(ID 기반) | - |
+| 대상 | 헤더 | 발급 방법 |
+|------|------|-----------|
+| 앱 사용자 | `X-User-Token` | 가입/로그인(`/api/users`, `/api/auth/login`) 시 발급 |
+| 시리얼 브리지 업로드 | `X-API-Key` | 환경변수 `INGEST_API_KEY` |
+| 관리자 조회 | `X-Admin-Token` | 환경변수 `ADMIN_TOKEN` |
 
-연구/데모 수준의 보호다. 외부 공개 시에는 사용자 계정 인증(예: JWT)으로 교체해야 한다.
+- 사용자 데이터(`/api/users/{id}/*`, `/api/sessions/*`)는 **본인 토큰으로만** 접근된다.
+  남의 ID 를 알아도 403 이다. 비밀번호는 scrypt 로 해시해 저장한다(평문 저장 없음).
+- 로그인 실패 응답은 "ID 없음"과 "비밀번호 틀림"을 구분하지 않는다(계정 열거 방지).
+- 기본 토큰(`dev-admin-token` / `dev-ingest-key`)으로는 서버가 기동을 거부한다.
+  로컬 개발만 `SLEEP_ALLOW_DEV_TOKENS=1` 로 허용되며 `server/run.py` 가 자동으로 켠다.
+
+클라우드 배포는 [DEPLOY.md](DEPLOY.md) 참고.
 
 ## 엔드포인트
 
@@ -45,8 +51,10 @@ ADMIN_TOKEN=... INGEST_API_KEY=... \
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| POST | `/api/users` | 사용자 ID 등록 (중복 시 409) |
-| GET | `/api/users/{id}` | ID 존재 확인(기존 ID로 로그인) |
+| POST | `/api/users` | 가입 — ID·비밀번호 등록, 접근 토큰 발급 (중복 시 409) |
+| POST | `/api/auth/login` | 로그인 — 접근 토큰 발급 |
+| POST | `/api/auth/logout` | 이 기기의 토큰 폐기 |
+| GET | `/api/users/{id}` | 내 정보 |
 | POST | `/api/devices` | 기기 등록 / 소유자 변경 |
 | GET | `/api/devices/pending` | 등록되지 않은 채 신호를 보내온 기기 목록(앱의 "연결된 기기 찾기") |
 | GET | `/api/users/{id}/devices` | 내 기기 목록 |

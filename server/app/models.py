@@ -8,9 +8,25 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 ID_PATTERN = r"^[A-Za-z0-9_.-]{2,32}$"
 
 
+MIN_PASSWORD_LEN = 8
+
+
 class UserCreate(BaseModel):
     user_id: str = Field(pattern=ID_PATTERN, description="사용자 ID (영문/숫자/._-, 2~32자)")
     name: str = Field(default="", max_length=64)
+    password: str = Field(min_length=MIN_PASSWORD_LEN, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    user_id: str = Field(pattern=ID_PATTERN)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class AuthResult(BaseModel):
+    """로그인/가입 성공 시 앱이 저장하는 값."""
+
+    user: "UserOut"
+    access_token: str
 
 
 class DeviceRegister(BaseModel):

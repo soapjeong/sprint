@@ -14,7 +14,7 @@ ESP32 기기, PC 브리지, 백엔드, 모바일 앱으로 구성된다.
 |------|------|
 | `firmware/` | ESP32 펌웨어 (PID 가온, 안전 감시, 안정심박수 기준 입면 판정) + 하드웨어 없이 도는 로직 테스트 |
 | `serial_csv_logger.py` | PC 브리지 — 시리얼 로그를 CSV 로 저장하고 서버로 업로드 |
-| `server/` | FastAPI + SQLite 백엔드 (사용자·기기 등록, 세션 DB, 관리자 조회) |
+| `server/` | FastAPI + SQLite 백엔드 (로그인, 기기 등록, 세션 DB, 관리자 조회) — 배포는 `server/DEPLOY.md` |
 | `mobile/` | Expo(React Native) 앱 — 사용자 페이지 / 관리자 페이지 |
 | `streamlit_app.py` | 초기 연구용 대시보드(레거시) |
 | `tests/`, `server/tests/` | 브리지 파싱 · API 통합 테스트 |
@@ -49,4 +49,10 @@ firmware/test/run_tests.sh               # 펌웨어 로직 (하드웨어 불필
 cd mobile && npm run typecheck           # 앱 타입 검사
 ```
 
-자세한 내용은 `firmware/README.md`, `server/README.md`, `mobile/README.md` 참고.
+## 클라우드 배포
+
+PC 를 켜두지 않아도 앱이 돌게 하려면 `server/DEPLOY.md` 의 Fly.io 절차를 따른다.
+배포 시에는 `ADMIN_TOKEN` / `INGEST_API_KEY` 를 반드시 직접 설정해야 하며(기본값이면 기동 거부),
+사용자 데이터는 비밀번호 로그인으로 본인만 볼 수 있다.
+
+자세한 내용은 `firmware/README.md`, `server/README.md`, `server/DEPLOY.md`, `mobile/README.md` 참고.

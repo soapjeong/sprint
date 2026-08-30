@@ -33,6 +33,9 @@ def lan_ip() -> str:
 
 
 def main() -> None:
+    # 로컬 개발 실행기이므로 기본 토큰을 허용한다(컨테이너/클라우드에서는 허용하지 않는다).
+    os.environ.setdefault("SLEEP_ALLOW_DEV_TOKENS", "1")
+
     import uvicorn
 
     host = os.environ.get("HOST", "0.0.0.0")
