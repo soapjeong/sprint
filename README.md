@@ -29,16 +29,16 @@ python server/run.py        # 앱에 입력할 서버 주소와 토큰을 출력
 # 2) 앱 (첫 화면에서 서버 주소 + 사용자 ID + 기기 등록)
 cd mobile && npm install && npx expo start
 
-# 3) 기기 연결 (앱에서 등록한 기기 ID 를 --device 에 그대로)
+# 3) 기기 연결 — 기기 ID 는 칩 MAC 에서 자동 인식된다(--device 불필요)
 python serial_csv_logger.py --port /dev/ttyUSB0 \
-  --server http://192.168.0.10:8000 --api-key my-key --device DORMX-001
+  --server http://192.168.0.10:8000 --api-key my-key
 ```
 
 하드웨어 없이 파이프라인만 확인하려면:
 
 ```bash
 python serial_csv_logger.py --replay tests/data/sample_serial.log \
-  --server http://127.0.0.1:8000 --api-key my-key --device DORMX-001
+  --server http://127.0.0.1:8000 --api-key my-key
 ```
 
 ## 검사

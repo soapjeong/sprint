@@ -7,7 +7,9 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dormx.sleep",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -16,7 +18,9 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.dormx.sleep",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -25,7 +29,18 @@
     },
     "scheme": "dormx",
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          },
+          "ios": {
+            "flipper": false
+          }
+        }
+      ]
     ],
     "extra": {
       "defaultServerUrl": "http://localhost:8000"

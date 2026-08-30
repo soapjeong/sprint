@@ -1,5 +1,5 @@
 /* ============================================================================
- * ESP32 개인 맞춤 입면 온도 탐색기 — 실제 하드웨어 통합 버전 (v6)
+ * ESP32 개인 맞춤 입면 온도 탐색기 — 실제 하드웨어 통합 버전 (v7)
  * (Personalized Sleep-Onset Temperature Optimizer for real ESP32 kit)
  *
  * v3 -> v4 변경점
@@ -18,6 +18,10 @@
  *     않는다(가열은 워밍업 종료 후 시작).
  *  5) 60분 미입면(타임아웃) -> 히터 + 모든 센서 정지 후 기기 종료.
  *
+ * v6 -> v7 변경점
+ *  7) 기기 ID 를 칩에 구워진 MAC(efuse)에서 만들어 쓴다 — 사람이 정하지 않는다.
+ *     부팅 시 "@ID,DORMX-XXXXXXXXXXXX" 로 알리고, 호스트는 이 값으로 업로드한다.
+ *
  * v5 -> v6 변경점
  *  6) 입면 확정 시: 입면 판정용 생체 센서(MPU6050/MAX30102)는 즉시 정지하고,
  *     목표 온도로 HEATING_DURATION_MS(10분) 동안 가온을 유지한 뒤 히터와 온도 센서를
@@ -34,6 +38,7 @@
 #include "MAX30105.h"
 #include "heartRate.h"
 #include "esp_sleep.h"
+#include "esp_mac.h"
 #include "driver/rtc_io.h"
 
 // ===========================================================================
@@ -206,6 +211,8 @@ static void finalizeNoOnset();
 static void updateSession(unsigned long now);
 static void shutdownDevice(const char* reason);
 
+static void buildDeviceId();             // 칩 MAC(efuse) -> 기기 고유 ID
+static void announceDeviceId();          // 호스트에 기기 ID 알림
 static void sendServerFlag(const char* flag, float v1, float v2);
 static void printCsvHeader();
 static void logCsv(unsigned long t, float skinC, float heaterC, int duty);
@@ -277,6 +284,8 @@ static unsigned long lastControlMs = 0, lastLogMs = 0;
 // 프로파일 / NVS
 static Profile g_profile;
 static char g_personId[16] = "default";
+// [변경 7] 칩에 구워진 MAC 에서 만든 기기 고유 ID. 사람이 바꿀 수 없다.
+static char g_deviceId[20] = "DORMX-UNKNOWN";
 static Preferences prefs;
 
 // ===========================================================================
@@ -815,6 +824,25 @@ static void eraseProfile(const char* id) {
 // 서버(호스트 PC) 상태 플래그 전송
 //   포맷: @FLAG,<person>,<flag>,<millis>,<v1>,<v2>
 // ===========================================================================
+// [변경 7] ESP32 efuse 에 구워진 기본 MAC(6바이트)으로 기기 ID 를 만든다.
+//          같은 칩이면 항상 같은 값이고, 사용자가 입력할 필요가 없다.
+static void buildDeviceId() {
+  uint8_t mac[6] = {0};
+  if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
+    strncpy(g_deviceId, "DORMX-UNKNOWN", sizeof(g_deviceId) - 1);
+    g_deviceId[sizeof(g_deviceId) - 1] = 0;
+    return;
+  }
+  snprintf(g_deviceId, sizeof(g_deviceId), "DORMX-%02X%02X%02X%02X%02X%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+// 호스트(브리지)가 이 줄을 보고 업로드에 쓸 기기 ID 를 자동으로 잡는다.
+static void announceDeviceId() {
+  Serial.print("@ID,");
+  Serial.println(g_deviceId);
+}
+
 static void sendServerFlag(const char* flag, float v1, float v2) {
   Serial.print("@FLAG,");
   Serial.print(g_personId);   Serial.print(',');
@@ -1040,7 +1068,8 @@ static void logCsv(unsigned long t, float skinC, float heaterC, int duty) {
 }
 
 static void printReport() {
-  Serial.print("# ---- 리포트: "); Serial.print(g_personId); Serial.println(" ----");
+  Serial.print("# ---- 리포트: "); Serial.print(g_personId);
+  Serial.print(" / 기기 "); Serial.print(g_deviceId); Serial.println(" ----");
   Serial.println("# 설정온도 , 평균 수면잠복기(분) , 시도횟수");
   for (int i = 0; i < g_profile.nBins; i++) {
     Serial.print("#   ");
@@ -1089,6 +1118,8 @@ static void handleSerial(float skinC, float heaterC) {
         manualTempSet = true;
         Serial.print("# 세션 온도 수동 지정=");
         Serial.println(sessionTemp,1);
+      } else if (strcmp(buf,"whoami") == 0) {
+        announceDeviceId();
       } else if (strcmp(buf,"report") == 0) {
         printReport();
       } else if (strcmp(buf,"reset_profile") == 0) {
@@ -1169,7 +1200,10 @@ void setup() {
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0)
     Serial.println("# 버튼 입력으로 딥슬립에서 재기동했습니다.");
 
-  Serial.println("# ESP32 Sleep-Onset Temperature Optimizer [실기 v4]");
+  buildDeviceId();
+  Serial.println("# ESP32 Sleep-Onset Temperature Optimizer [실기 v7]");
+  Serial.print("# 기기 ID(칩 MAC 기반) = "); Serial.println(g_deviceId);
+  announceDeviceId();
   Serial.print("# SkinHardLimit="); Serial.print(SKIN_HARD_LIMIT_C,1);
   Serial.print("C HeaterHardLimit="); Serial.print(HEATER_HARD_LIMIT_C,1);
   Serial.print("C SearchRange="); Serial.print(SEARCH_MIN,1);
@@ -1194,7 +1228,7 @@ void setup() {
 #else
   Serial.println("# 입면 확정 시: 즉시 히터/센서 정지 후 기기 전원 종료");
 #endif
-  Serial.println("# cmds: id <name> | start | abort | set <c> | report | reset_profile | off | r");
+  Serial.println("# cmds: id <name> | whoami | start | abort | set <c> | report | reset_profile | off | r");
 
   printCsvHeader();
   lastControlMs = lastLogMs = millis();

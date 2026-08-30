@@ -1,4 +1,6 @@
-# ESP32 Sleep-Onset Temperature Optimizer [실기 v6]
+# ESP32 Sleep-Onset Temperature Optimizer [실기 v7]
+# 기기 ID(칩 MAC 기반) = DORMX-246F28AABBCC
+@ID,DORMX-246F28AABBCC
 # 센서: start 전까지 정지, start 후 20s 워밍업(데이터 폐기, 히터 OFF)
 ======================================================
   ESP32 수면 온도 제어기 부팅 완료 (실시간 모니터링 시작)

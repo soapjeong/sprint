@@ -48,16 +48,19 @@ ADMIN_TOKEN=... INGEST_API_KEY=... \
 | POST | `/api/users` | 사용자 ID 등록 (중복 시 409) |
 | GET | `/api/users/{id}` | ID 존재 확인(기존 ID로 로그인) |
 | POST | `/api/devices` | 기기 등록 / 소유자 변경 |
+| GET | `/api/devices/pending` | 등록되지 않은 채 신호를 보내온 기기 목록(앱의 "연결된 기기 찾기") |
 | GET | `/api/users/{id}/devices` | 내 기기 목록 |
 | DELETE | `/api/devices/{device_id}` | 기기 등록 해제 |
 | GET | `/api/users/{id}/summary` | 세션 수, 평균·최단 SOL, 온도별 성적, 최근 세션 |
 | GET | `/api/users/{id}/sessions` | 세션 목록 |
 | GET | `/api/sessions/{session_id}` | 세션 + 측정 샘플 + 이벤트 |
+| POST | `/api/sessions/{session_id}/review` | 아침 수면 평가(별점 1~5 + 특이사항) |
 
 **브리지 업로드** (`X-API-Key`)
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
+| POST | `/api/ingest/announce` | 기기 부팅(`@ID,...`) 통보 — 미등록이면 pending 목록에 올린다 |
 | POST | `/api/ingest/events` | `@FLAG` / `@RESULT` 한 줄 → 세션 상태 갱신 |
 | POST | `/api/ingest/samples` | 1초 주기 측정값 배치 |
 
@@ -68,6 +71,22 @@ ADMIN_TOKEN=... INGEST_API_KEY=... \
 | GET | `/api/admin/users` | ID별 세션 수·입면 수·평균 SOL·최근 활동 |
 | GET | `/api/admin/users/{id}` | 해당 ID의 기기/세션/이벤트 전체 |
 | GET | `/api/admin/export/sessions.csv` | 세션 CSV 내보내기(`?user_id=` 필터) |
+
+## 기기 등록 흐름
+
+기기 ID 는 ESP32 칩의 MAC 에서 만들어져 사람이 외울 수 없다. 그래서 이렇게 등록한다.
+
+1. 기기를 USB 로 연결하고 브리지 실행 → 브리지가 `@ID,...` 를 보고 `/api/ingest/announce` 호출
+2. 미등록 기기이므로 `pending_devices` 에 올라감 (측정 데이터는 이 시점엔 404 로 거절)
+3. 앱 첫 화면에서 **연결된 기기 찾기** → 목록에서 선택 → `/api/devices` 로 등록
+4. 이후 업로드부터 그 사용자 ID 로 쌓인다
+
+## 아침 수면 평가
+
+세션이 끝나면(`onset` / `no_onset`) 그 세션은 평가 대기 상태가 되고,
+`/api/users/{id}/summary` 의 `pending_review` 에 실려 앱 홈 화면에 평가 카드가 뜬다.
+별점(1~5)과 특이사항(`alcohol` / `caffeine` / `none` / `other`)을 저장하면 카드가 사라진다.
+`other` 는 `note_text` 가 비어 있으면 422 로 거절한다.
 
 ## 세션이 만들어지는 규칙
 

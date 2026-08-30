@@ -1,10 +1,12 @@
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { api, ApiError } from '@/api/client';
+import type { PendingDevice } from '@/api/types';
 import { useSettings } from '@/store/settings';
-import { spacing } from '@/theme';
+import { spacing, useTheme } from '@/theme';
 import { Body, Button, Caption, Card, ErrorNote, Field, Heading, Loading, Row, Screen, Title } from '@/ui/kit';
+import { formatDateTime } from '@/util/format';
 
 const ID_RE = /^[A-Za-z0-9_.-]{2,32}$/;
 
@@ -14,6 +16,7 @@ const ID_RE = /^[A-Za-z0-9_.-]{2,32}$/;
  */
 export default function OnboardingScreen() {
   const router = useRouter();
+  const t = useTheme();
   const { settings, ready, update } = useSettings();
 
   const [serverUrl, setServerUrl] = useState(settings.serverUrl);
@@ -21,7 +24,9 @@ export default function OnboardingScreen() {
   const [name, setName] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [deviceLabel, setDeviceLabel] = useState('');
-  const [busy, setBusy] = useState<null | 'user' | 'device'>(null);
+  const [busy, setBusy] = useState<null | 'user' | 'device' | 'scan'>(null);
+  const [found, setFound] = useState<PendingDevice[] | null>(null);
+  const [manual, setManual] = useState(false);
   const [error, setError] = useState('');
   const [step, setStep] = useState<'user' | 'device'>('user');
 
@@ -75,10 +80,28 @@ export default function OnboardingScreen() {
     }
   }
 
+  /** 기기 ID 는 칩 MAC 에서 만들어지므로 손으로 적지 않고 목록에서 고른다. */
+  async function scanDevices() {
+    setError('');
+    setBusy('scan');
+    try {
+      const list = await api.pendingDevices(serverUrl);
+      setFound(list);
+      if (list.length === 1) setDeviceId(list[0].device_id);
+      if (list.length === 0) {
+        setError('연결된 기기를 찾지 못했습니다. 기기에 USB를 연결하고 브리지를 실행한 뒤 다시 눌러주세요.');
+      }
+    } catch (e) {
+      setError((e as ApiError).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function submitDevice() {
     setError('');
     if (!ID_RE.test(deviceId.trim())) {
-      setError('기기 번호는 기기 뒷면 라벨(예: DORMX-001) 그대로 입력하세요.');
+      setError('기기를 먼저 목록에서 선택하거나 ID를 직접 입력하세요.');
       return;
     }
     setBusy('device');
@@ -153,14 +176,55 @@ export default function OnboardingScreen() {
 
           <Card>
             <Heading>3. 기기 등록</Heading>
-            <Field
-              label="기기 번호"
-              value={deviceId}
-              onChangeText={setDeviceId}
-              placeholder="DORMX-001"
-              hint="기기 뒷면 라벨의 번호. 브리지 실행 시 --device 값과 같아야 합니다."
-              editable={step === 'device'}
+            <Body muted>
+              기기 ID는 칩에 새겨진 고유 번호(MAC)라 직접 입력할 필요가 없습니다. 기기를 켜 두고 아래에서
+              찾아 선택하세요.
+            </Body>
+            <Button
+              label={busy === 'scan' ? '찾는 중…' : '연결된 기기 찾기'}
+              onPress={scanDevices}
+              loading={busy === 'scan'}
+              disabled={step !== 'device'}
             />
+
+            {found?.map((d) => {
+              const selected = deviceId === d.device_id;
+              return (
+                <Pressable
+                  key={d.device_id}
+                  onPress={() => setDeviceId(d.device_id)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  style={({ pressed }) => ({
+                    borderWidth: 1,
+                    borderColor: selected ? t.accent : t.border,
+                    backgroundColor: selected ? t.surfaceAlt : 'transparent',
+                    borderRadius: 10,
+                    padding: spacing.md,
+                    gap: 2,
+                    opacity: pressed ? 0.7 : 1,
+                  })}>
+                  <Body>{d.device_id}</Body>
+                  <Caption>{`마지막 신호 ${formatDateTime(d.last_seen_at)}`}</Caption>
+                </Pressable>
+              );
+            })}
+
+            {manual ? (
+              <Field
+                label="기기 ID 직접 입력"
+                value={deviceId}
+                onChangeText={setDeviceId}
+                placeholder="DORMX-246F28AABBCC"
+                hint="기기 시리얼 로그의 '@ID,...' 줄에 찍히는 값입니다."
+                editable={step === 'device'}
+              />
+            ) : (
+              <Pressable onPress={() => setManual(true)} hitSlop={8}>
+                <Caption>기기를 못 찾겠다면 · ID 직접 입력하기</Caption>
+              </Pressable>
+            )}
+
             <Field
               label="기기 별칭(선택)"
               value={deviceLabel}
@@ -172,7 +236,7 @@ export default function OnboardingScreen() {
               label="기기 등록하고 시작"
               onPress={submitDevice}
               loading={busy === 'device'}
-              disabled={step !== 'device'}
+              disabled={step !== 'device' || !deviceId}
             />
             {step !== 'device' ? <Caption>사용자 ID를 먼저 확인해 주세요.</Caption> : null}
           </Card>

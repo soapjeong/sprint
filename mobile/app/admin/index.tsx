@@ -109,9 +109,9 @@ export default function AdminHomeScreen() {
                     <Caption>{`세션 ${r.session_count} / 입면 ${r.onset_count}`}</Caption>
                   </Row>
                   <Caption>
-                    {`평균 ${formatMinutes(r.avg_sol_min)}분 · 기기 ${r.device_count}대 · 최근 ${formatDateTime(
-                      r.last_session_at,
-                    )}`}
+                    {`평균 ${formatMinutes(r.avg_sol_min)}분 · 별점 ${
+                      r.avg_rating ? r.avg_rating.toFixed(1) : '-'
+                    } · 기기 ${r.device_count}대 · 최근 ${formatDateTime(r.last_session_at)}`}
                   </Caption>
                 </Pressable>
               ))}

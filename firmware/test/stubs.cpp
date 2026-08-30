@@ -6,6 +6,7 @@
 #include <MAX30105.h>
 #include <heartRate.h>
 #include <esp_sleep.h>
+#include <esp_mac.h>
 #include <driver/rtc_io.h>
 #include <cstdio>
 
@@ -74,6 +75,9 @@ void MAX30105::shutDown() { g_maxShutdown = true; }
 void MAX30105::wakeUp() { g_maxShutdown = false; }
 bool g_forceBeat = false;
 bool checkForBeat(long) { return g_forceBeat; }
+
+uint8_t g_fakeMac[6] = {0x24, 0x6F, 0x28, 0xAA, 0xBB, 0xCC};
+esp_err_t esp_read_mac(uint8_t* mac, esp_mac_type_t) { for (int i = 0; i < 6; i++) mac[i] = g_fakeMac[i]; return ESP_OK; }
 
 esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_WAKEUP_UNDEFINED; }
 int esp_sleep_enable_ext0_wakeup(gpio_num_t, int) { return 0; }

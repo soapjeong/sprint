@@ -46,6 +46,11 @@ def test_non_status_lines_ignored():
     assert bridge.parse_event_line("# 그냥 안내문") is None
 
 
+def test_parse_device_id_line():
+    assert bridge.parse_device_id_line("@ID,DORMX-246F28AABBCC") == "DORMX-246F28AABBCC"
+    assert bridge.parse_device_id_line("# 기기 ID = DORMX-1") is None
+
+
 def test_parse_flag_and_result_lines():
     e = bridge.parse_event_line("@FLAG,sub01,SLEEP_ONSET,1500000,24.50,66.00")
     assert e == {
@@ -64,11 +69,18 @@ def captured_upload(tmp_path, monkeypatch):
         bridge.ServerUploader, "_post",
         lambda self, path, payload: posts.append((path, payload)) or {},
     )
-    uploader = bridge.ServerUploader("http://test", "dev-ingest-key", "DORMX-001", batch=1000)
+    uploader = bridge.ServerUploader("http://test", "dev-ingest-key", "", batch=1000)
     logger = bridge.SerialCsvLogger(None, 115200, str(tmp_path), uploader=uploader, replay=SAMPLE_LOG)
     logger.uploader.start()
     logger.run()
     return posts
+
+
+def test_device_id_comes_from_firmware(captured_upload):
+    """--device 없이도 기기가 알려준 MAC 기반 ID 로 업로드된다."""
+    announces = [p for path, p in captured_upload if path.endswith("/announce")]
+    assert announces and announces[0]["device_id"] == "DORMX-246F28AABBCC"
+    assert all(p["device_id"] == "DORMX-246F28AABBCC" for path, p in captured_upload)
 
 
 def test_replay_uploads_events_and_samples(captured_upload):
@@ -78,7 +90,7 @@ def test_replay_uploads_events_and_samples(captured_upload):
         "SESSION_START", "WARMUP_DONE", "HR_BASELINE", "SLEEP_ONSET",
         "RESULT", "COOLDOWN_START", "SESSION_DONE", "POWER_OFF",
     ]
-    assert all(e["device_id"] == "DORMX-001" for e in events)
+    assert all(e["device_id"] == "DORMX-246F28AABBCC" for e in events)
     uploaded = [s for batch in samples for s in batch["samples"]]
     assert len(uploaded) == 6
     assert uploaded[0]["session_state"] == "WARMUP" and uploaded[0]["duty_pct"] == 0.0
@@ -91,7 +103,10 @@ def test_uploaded_payloads_are_accepted_by_server(tmp_path, monkeypatch, capture
     db.init_db(str(tmp_path / "e2e.db"))
     with TestClient(app) as client:
         client.post("/api/users", json={"user_id": "sub01", "name": "테스터"})
-        client.post("/api/devices", json={"device_id": "DORMX-001", "user_id": "sub01", "label": "침대"})
+        client.post(
+            "/api/devices",
+            json={"device_id": "DORMX-246F28AABBCC", "user_id": "sub01", "label": "침대"},
+        )
         for path, payload in captured_upload:
             r = client.post("/api" + path.split("/api", 1)[1], headers={"X-API-Key": "dev-ingest-key"}, json=payload)
             assert r.status_code == 200, r.text

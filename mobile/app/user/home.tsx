@@ -2,10 +2,11 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { api, ApiError } from '@/api/client';
-import type { UserSummary } from '@/api/types';
+import type { NoteCode, UserSummary } from '@/api/types';
 import { useSettings } from '@/store/settings';
 import { spacing, useTheme } from '@/theme';
 import { SolTrendChart, TempBarChart } from '@/ui/charts';
+import { ReviewSummary, SleepReviewCard } from '@/ui/review';
 import {
   Body, Button, Caption, Card, ErrorNote, Heading, Loading, OutcomeBadge, Row, Screen, StatTile, Title,
 } from '@/ui/kit';
@@ -19,6 +20,8 @@ export default function UserHomeScreen() {
   const [summary, setSummary] = useState<UserSummary | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState('');
 
   const load = useCallback(async () => {
     if (!settings.userId) return;
@@ -37,6 +40,21 @@ export default function UserHomeScreen() {
       load();
     }, [load]),
   );
+
+  async function submitReview(rating: number, note: NoteCode, text: string) {
+    const pending = summary?.pending_review;
+    if (!pending) return;
+    setReviewError('');
+    setReviewing(true);
+    try {
+      await api.reviewSession(settings.serverUrl, pending.session_id, rating, note, text);
+      await load();
+    } catch (e) {
+      setReviewError((e as ApiError).message);
+    } finally {
+      setReviewing(false);
+    }
+  }
 
   if (loading && !summary) {
     return (
@@ -63,6 +81,17 @@ export default function UserHomeScreen() {
           <Caption>{`ID ${settings.userId} · 기기 ${settings.deviceId ?? '미등록'}`}</Caption>
         </View>
 
+        {summary?.pending_review ? (
+          <Card>
+            <SleepReviewCard
+              dateLabel={formatDateTime(summary.pending_review.started_at)}
+              onSubmit={submitReview}
+              submitting={reviewing}
+              error={reviewError}
+            />
+          </Card>
+        ) : null}
+
         <Card>
           <Heading>지금까지의 기록</Heading>
           <Row>
@@ -72,6 +101,13 @@ export default function UserHomeScreen() {
           <Row>
             <StatTile label="평균 잠들기" value={formatMinutes(summary?.avg_sol_min)} unit="분" />
             <StatTile label="최단 기록" value={formatMinutes(summary?.best_sol_min)} unit="분" />
+          </Row>
+          <Row>
+            <StatTile
+              label="내가 매긴 평균 별점"
+              value={summary?.avg_rating ? summary.avg_rating.toFixed(1) : '-'}
+              unit="/ 5"
+            />
           </Row>
           {summary?.best_temp_c != null ? (
             <Body muted>{`지금까지는 ${formatTemp(summary.best_temp_c)} 설정에서 가장 빨리 잠들었어요.`}</Body>
@@ -124,6 +160,7 @@ export default function UserHomeScreen() {
                     s.resting_bpm ? s.resting_bpm.toFixed(0) : '-'
                   } BPM`}
                 </Caption>
+                <ReviewSummary rating={s.rating} noteCode={s.note_code} noteText={s.note_text} />
               </Pressable>
             ))
           ) : (

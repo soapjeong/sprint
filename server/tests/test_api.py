@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -158,6 +159,114 @@ def test_samples_without_open_session_are_skipped(client):
         json={"device_id": device_id, "samples": [{"device_ms": 1000, "skin_c": 30.0}]},
     )
     assert r.json() == {"stored": 0, "skipped": 1, "session_id": None, "detail": "진행 중인 세션 없음"}
+
+
+# ---------------------------------------------------------------- 기기 자동 발견(칩 MAC ID)
+def announce(client, device_id, firmware=""):
+    return client.post(
+        "/api/ingest/announce",
+        headers=INGEST,
+        json={"device_id": device_id, "firmware": firmware},
+    )
+
+
+def test_unregistered_device_shows_up_as_pending(client):
+    """기기 ID 는 칩 MAC 이라 손으로 못 외우므로, 앱이 목록에서 고를 수 있어야 한다."""
+    r = announce(client, "DORMX-246F28AABBCC", "v7")
+    assert r.json() == {
+        "device_id": "DORMX-246F28AABBCC", "registered": False, "user_id": None,
+        "detail": "앱에서 이 기기를 등록하세요.",
+    }
+    pending = client.get("/api/devices/pending").json()
+    assert [p["device_id"] for p in pending] == ["DORMX-246F28AABBCC"]
+    assert pending[0]["firmware"] == "v7"
+
+
+def test_registered_device_is_not_pending(client):
+    announce(client, "DORMX-246F28AABBCC")
+    client.post("/api/users", json={"user_id": "sub01", "name": ""})
+    client.post("/api/devices", json={"device_id": "DORMX-246F28AABBCC", "user_id": "sub01", "label": ""})
+    assert client.get("/api/devices/pending").json() == []
+
+    again = announce(client, "DORMX-246F28AABBCC")
+    assert again.json()["registered"] is True and again.json()["user_id"] == "sub01"
+    assert client.get("/api/devices/pending").json() == []
+
+
+def test_pending_list_hides_old_sightings(client):
+    """며칠 전에 잠깐 켰던 기기가 목록을 채우지 않도록 최근 것만 보여준다."""
+    announce(client, "DORMX-OLD")
+    stale = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat(timespec="seconds")
+    with db.session_scope() as conn:
+        conn.execute("UPDATE pending_devices SET last_seen_at=?", (stale,))
+
+    assert client.get("/api/devices/pending?minutes=60").json() == []
+    assert [p["device_id"] for p in client.get("/api/devices/pending?minutes=600").json()] == ["DORMX-OLD"]
+
+
+# ---------------------------------------------------------------- 아침 수면 평가
+def review(client, session_id, rating, note_code, note_text=""):
+    return client.post(
+        f"/api/sessions/{session_id}/review",
+        json={"rating": rating, "note_code": note_code, "note_text": note_text},
+    )
+
+
+def finished_session(client, device_id="DORMX-001", sol=25.0):
+    flag(client, device_id, "SESSION_START", [39.0])
+    flag(client, device_id, "SLEEP_ONSET", [sol])
+    flag(client, device_id, "POWER_OFF", [0, 0])
+    return client.get("/api/users/sub01/sessions").json()[0]["session_id"]
+
+
+def test_review_records_rating_and_note(client):
+    _, device_id = register(client)
+    sid = finished_session(client, device_id)
+    r = review(client, sid, 4, "caffeine")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["rating"] == 4 and body["note_code"] == "caffeine" and body["reviewed_at"]
+
+
+def test_review_rejects_bad_input(client):
+    _, device_id = register(client)
+    sid = finished_session(client, device_id)
+    assert review(client, sid, 6, "none").status_code == 422          # 별점 범위 밖
+    assert review(client, sid, 3, "hangover").status_code == 422      # 없는 특이사항 코드
+    assert review(client, sid, 3, "other").status_code == 422         # 기타인데 내용 없음
+    assert review(client, sid, 3, "other", "야근").status_code == 200
+
+
+def test_home_asks_for_review_until_it_is_given(client):
+    _, device_id = register(client)
+    sid = finished_session(client, device_id)
+
+    summary = client.get("/api/users/sub01/summary").json()
+    assert summary["pending_review"]["session_id"] == sid    # 홈 화면에 평가 카드
+    assert summary["avg_rating"] is None
+
+    review(client, sid, 5, "none")
+    summary = client.get("/api/users/sub01/summary").json()
+    assert summary["pending_review"] is None                 # 평가하면 카드가 사라진다
+    assert summary["avg_rating"] == 5.0
+    assert summary["recent_sessions"][0]["note_code"] == "none"
+
+
+def test_running_session_is_not_asked_for_review(client):
+    _, device_id = register(client)
+    flag(client, device_id, "SESSION_START", [39.0])
+    assert client.get("/api/users/sub01/summary").json()["pending_review"] is None
+
+
+def test_admin_sees_average_rating(client):
+    _, device_id = register(client)
+    sid = finished_session(client, device_id)
+    review(client, sid, 4, "alcohol", "")
+    row = client.get("/api/admin/users", headers=ADMIN).json()[0]
+    assert row["avg_rating"] == 4.0
+    csv_text = client.get("/api/admin/export/sessions.csv", headers=ADMIN).text
+    assert "rating,note_code,note_text" in csv_text.splitlines()[0]
+    assert ",4,alcohol," in csv_text.splitlines()[1]
 
 
 # ---------------------------------------------------------------- 사용자 화면 집계

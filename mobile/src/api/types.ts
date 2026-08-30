@@ -10,6 +10,23 @@ export type Device = {
 
 export type SessionOutcome = 'running' | 'onset' | 'no_onset' | 'aborted' | 'fault';
 
+/** 아침 평가의 특이사항 선택지 */
+export type NoteCode = 'alcohol' | 'caffeine' | 'none' | 'other';
+
+export const NOTE_OPTIONS: { code: NoteCode; label: string }[] = [
+  { code: 'alcohol', label: '음주' },
+  { code: 'caffeine', label: '취침 6시간 이내 카페인 섭취' },
+  { code: 'none', label: '없음' },
+  { code: 'other', label: '기타' },
+];
+
+export type PendingDevice = {
+  device_id: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  firmware: string;
+};
+
 export type Session = {
   session_id: number;
   user_id: string;
@@ -21,6 +38,10 @@ export type Session = {
   threshold_bpm: number | null;
   sol_min: number | null;
   outcome: SessionOutcome;
+  rating: number | null;
+  note_code: NoteCode | null;
+  note_text: string | null;
+  reviewed_at: string | null;
 };
 
 export type TempStat = { target_temp_c: number; avg_sol_min: number; onset_count: number };
@@ -35,6 +56,9 @@ export type UserSummary = {
   best_temp_c: number | null;
   temp_stats: TempStat[];
   recent_sessions: Session[];
+  /** 아직 별점을 남기지 않은 최근 세션 — 있으면 홈에 평가 카드를 띄운다 */
+  pending_review: Session | null;
+  avg_rating: number | null;
 };
 
 export type Sample = {
@@ -77,6 +101,7 @@ export type AdminUserRow = {
   session_count: number;
   onset_count: number;
   avg_sol_min: number | null;
+  avg_rating: number | null;
   last_session_at: string | null;
 };
 

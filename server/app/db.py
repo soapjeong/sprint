@@ -43,7 +43,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     resting_bpm     REAL,
     threshold_bpm   REAL,
     sol_min         REAL,
-    outcome         TEXT NOT NULL DEFAULT 'running'   -- running | onset | no_onset | aborted | fault
+    outcome         TEXT NOT NULL DEFAULT 'running',  -- running | onset | no_onset | aborted | fault
+    -- 아침에 사용자가 남기는 수면 평가
+    rating          INTEGER,                          -- 1~5 별점
+    note_code       TEXT,                             -- alcohol | caffeine | none | other
+    note_text       TEXT,                             -- note_code='other' 일 때의 자유 입력
+    reviewed_at     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_open ON sessions(device_id, outcome);
@@ -83,7 +88,34 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, event_id);
 CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id, event_id DESC);
+
+-- 아직 어느 사용자에게도 등록되지 않은 채 신호를 보내온 기기.
+-- 앱의 "연결된 기기 찾기" 목록이 여기서 나온다.
+CREATE TABLE IF NOT EXISTS pending_devices (
+    device_id     TEXT PRIMARY KEY,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL,
+    firmware      TEXT NOT NULL DEFAULT ''
+);
 """
+
+# 기존 DB 파일에 나중에 추가된 컬럼(구버전 DB 호환)
+MIGRATIONS: dict[str, dict[str, str]] = {
+    "sessions": {
+        "rating": "INTEGER",
+        "note_code": "TEXT",
+        "note_text": "TEXT",
+        "reviewed_at": "TEXT",
+    },
+}
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    for table, columns in MIGRATIONS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
 def now_iso() -> str:
@@ -103,6 +135,7 @@ def connect(path: str | None = None) -> sqlite3.Connection:
 def init_db(path: str | None = None) -> None:
     with connect(path) as conn:
         conn.executescript(SCHEMA)
+        _apply_migrations(conn)
 
 
 @contextmanager

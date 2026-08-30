@@ -100,6 +100,18 @@ def parse_status_line(line):
     return sample
 
 
+def parse_device_id_line(line):
+    """"@ID,DORMX-246F28AABBCC" -> 기기 ID.
+
+    기기 ID 는 ESP32 칩의 MAC(efuse)에서 만들어지므로 사람이 지정하지 않는다.
+    """
+    line = line.strip()
+    if not line.startswith("@ID,"):
+        return None
+    device_id = line.split(",", 1)[1].strip()
+    return device_id or None
+
+
 def parse_event_line(line):
     """"@FLAG,<id>,<flag>,<ms>,<v1>,<v2>" / "@RESULT,..." -> 업로드용 dict."""
     line = line.strip()
@@ -188,11 +200,28 @@ class ServerUploader:
         e.start()
 
     def add_sample(self, sample):
+        if not self.device_id:            # 기기 ID 를 아직 모르면 보낼 곳이 없다
+            return
         with self._lock:
             self._samples.append(sample)
             ready = len(self._samples) >= self.batch
         if ready:
             self.flush_samples()
+
+    def set_device_id(self, device_id):
+        """기기가 알려준 ID 로 갈아탄다(수동 지정한 값이 없을 때만)."""
+        if self.device_id == device_id:
+            return False
+        self.flush_samples()          # 이전 기기 것으로 올라가지 않도록 먼저 비운다
+        self.device_id = device_id
+        return True
+
+    def announce(self, device_id, firmware=""):
+        self._post_safe(
+            "/api/ingest/announce",
+            {"device_id": device_id, "firmware": firmware},
+            f"announce {device_id}",
+        )
 
     def add_event(self, event):
         # 이벤트(세션 시작/종료 등)는 즉시 올라가므로, 그 전에 쌓인 샘플을 먼저 비워
@@ -203,7 +232,7 @@ class ServerUploader:
     def flush_samples(self):
         with self._lock:
             pending, self._samples = self._samples, []
-        if not pending:
+        if not pending or not self.device_id:
             return
         ok = self._post_safe(
             "/api/ingest/samples",
@@ -225,6 +254,8 @@ class ServerUploader:
             except queue.Empty:
                 if self._stop.is_set():
                     return
+                continue
+            if not self.device_id:
                 continue
             payload = dict(event)
             payload["device_id"] = self.device_id
@@ -268,13 +299,15 @@ def now_iso():
 
 
 class SerialCsvLogger:
-    def __init__(self, port, baud, outdir, uploader=None, replay=None, replay_delay=0.0):
+    def __init__(self, port, baud, outdir, uploader=None, replay=None, replay_delay=0.0,
+                 device_id_fixed=False):
         self.port = port
         self.baud = baud
         self.outdir = outdir
         self.uploader = uploader
         self.replay = replay
         self.replay_delay = replay_delay
+        self.device_id_fixed = device_id_fixed   # --device 로 직접 지정했으면 기기 통보를 무시
         os.makedirs(self.outdir, exist_ok=True)
 
         tag = timestamp_tag()
@@ -297,7 +330,8 @@ class SerialCsvLogger:
         else:
             print(f"  포트={self.port}  baud={self.baud}")
         if uploader:
-            print(f"  서버 업로드: {uploader.base_url}  기기={uploader.device_id}")
+            print(f"  서버 업로드: {uploader.base_url}  "
+                  f"기기={uploader.device_id or '기기가 알려줄 때까지 대기(@ID)'}")
         print("  종료하려면 Ctrl+C\n")
 
     # --- 시리얼 ---
@@ -339,6 +373,13 @@ class SerialCsvLogger:
             except Exception:
                 print(f"[데이터 파싱 에러] {line}")
             return
+
+        # 기기가 부팅하며 알려주는 고유 ID (칩 MAC 기반)
+        device_id = parse_device_id_line(line)
+        if device_id and self.uploader and not self.device_id_fixed:
+            if self.uploader.set_device_id(device_id):
+                print(f"[기기 인식] {device_id} — 이 ID 로 업로드합니다.")
+            self.uploader.announce(device_id)
 
         # 이벤트 및 안내 메시지: 상태 플래그(@FLAG,...) / 세션 결과(@RESULT,...) / 안내(#, =)
         if line.startswith(("#", "@", "=")) or "ESP32" in line:
@@ -438,22 +479,25 @@ def main():
     parser.add_argument("--outdir", default="./logs", help="로그 저장 폴더 (기본 ./logs)")
     parser.add_argument("--server", default=None, help="업로드할 서버 주소 (예: http://192.168.0.10:8000)")
     parser.add_argument("--api-key", default=os.environ.get("INGEST_API_KEY", ""), help="서버 업로드 API 키")
-    parser.add_argument("--device", default=None, help="앱에 등록한 기기 ID (예: DORMX-001)")
+    parser.add_argument("--device", default=None,
+                        help="기기 ID 직접 지정(보통 불필요 — 기기가 @ID 로 알려준다)")
     parser.add_argument("--replay", default=None, help="시리얼 대신 재생할 로그 파일")
     parser.add_argument("--replay-delay", type=float, default=0.0, help="재생 시 줄 간 지연(초)")
     args = parser.parse_args()
 
     uploader = None
     if args.server:
-        if not args.device:
-            parser.error("--server 를 쓰려면 --device (앱에서 등록한 기기 ID) 도 필요합니다.")
-        uploader = ServerUploader(args.server, args.api_key, args.device)
+        # 기기 ID 는 ESP32 가 부팅하며 "@ID,..." 로 알려준다. --device 는 수동 우선 지정용.
+        uploader = ServerUploader(args.server, args.api_key, args.device or "")
         uploader.start()
+        if args.device:
+            uploader.announce(args.device)
 
     port = None if args.replay else (args.port or pick_port_interactively())
     logger = SerialCsvLogger(
         port, args.baud, args.outdir,
         uploader=uploader, replay=args.replay, replay_delay=args.replay_delay,
+        device_id_fixed=bool(args.device),
     )
     logger.run()
 

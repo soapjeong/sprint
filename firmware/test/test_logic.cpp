@@ -196,6 +196,13 @@ int main() {
   check("60분 미입면: SOL 60분으로 기록",
         g_profile.nBins == 1 && fabsf(binMean(&g_profile.bins[0]) - 60.0f) < 0.01f);
 
+  // =====================================================================
+  // [변경 7] 기기 ID 는 칩 MAC(efuse)에서 만들어진다
+  // =====================================================================
+  buildDeviceId();
+  check("기기 ID = MAC 기반 DORMX-24 6F 28 AA BB CC",
+        strcmp(g_deviceId, "DORMX-246F28AABBCC") == 0);
+
   printf("\n%s (실패 %d건)\n", fails ? "일부 실패" : "모든 검증 통과", fails);
   return fails ? 1 : 0;
 }

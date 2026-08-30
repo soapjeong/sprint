@@ -11,7 +11,7 @@ import io
 import csv
 import sqlite3
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
@@ -21,12 +21,16 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from . import db
 from .models import (
     AdminUserRow,
+    AnnounceResult,
+    DeviceAnnounce,
     DeviceOut,
     DeviceRegister,
     EventIn,
     IngestResult,
+    PendingDevice,
     SampleBatch,
     SessionOut,
+    SessionReview,
     TempStat,
     UserCreate,
     UserOut,
@@ -147,8 +151,24 @@ def register_device(payload: DeviceRegister) -> DeviceOut:
                 "INSERT INTO devices(device_id, user_id, label, registered_at) VALUES(?,?,?,?)",
                 (payload.device_id, payload.user_id, payload.label, db.now_iso()),
             )
+        conn.execute("DELETE FROM pending_devices WHERE device_id=?", (payload.device_id,))
         row = conn.execute("SELECT * FROM devices WHERE device_id=?", (payload.device_id,)).fetchone()
         return DeviceOut(**_row_to_dict(row))
+
+
+@app.get("/api/devices/pending", response_model=list[PendingDevice])
+def pending_devices(minutes: int = Query(default=120, ge=1, le=1440)) -> list[PendingDevice]:
+    """아직 등록되지 않은 채 신호를 보내온 기기 목록.
+
+    기기 ID 는 칩 MAC 에서 만들어져 사람이 외울 수 없으므로, 앱은 이 목록에서 골라 등록한다.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    with db.session_scope() as conn:
+        rows = conn.execute(
+            "SELECT * FROM pending_devices WHERE last_seen_at >= ? ORDER BY last_seen_at DESC",
+            (cutoff,),
+        ).fetchall()
+        return [PendingDevice(**_row_to_dict(r)) for r in rows]
 
 
 @app.get("/api/users/{user_id}/devices", response_model=list[DeviceOut])
@@ -199,8 +219,17 @@ def user_summary(user_id: str) -> UserSummary:
             """SELECT COUNT(*) AS n,
                       SUM(CASE WHEN outcome='onset' THEN 1 ELSE 0 END) AS onsets,
                       AVG(CASE WHEN outcome='onset' THEN sol_min END) AS avg_sol,
-                      MIN(CASE WHEN outcome='onset' THEN sol_min END) AS best_sol
+                      MIN(CASE WHEN outcome='onset' THEN sol_min END) AS best_sol,
+                      AVG(rating) AS avg_rating
                  FROM sessions WHERE user_id=?""",
+            (user_id,),
+        ).fetchone()
+        # 끝났지만 아직 별점을 남기지 않은 가장 최근 세션 -> 홈 화면 평가 카드
+        pending = conn.execute(
+            """SELECT * FROM sessions
+                WHERE user_id=? AND reviewed_at IS NULL AND ended_at IS NOT NULL
+                  AND outcome IN ('onset','no_onset')
+                ORDER BY session_id DESC LIMIT 1""",
             (user_id,),
         ).fetchone()
         stats = [
@@ -228,6 +257,8 @@ def user_summary(user_id: str) -> UserSummary:
             best_temp_c=best_temp,
             temp_stats=stats,
             recent_sessions=_session_rows(conn, user_id, 10),
+            pending_review=SessionOut(**_row_to_dict(pending)) if pending else None,
+            avg_rating=round(agg["avg_rating"], 2) if agg["avg_rating"] is not None else None,
         )
 
 
@@ -251,7 +282,51 @@ def session_detail(session_id: int, samples: int = Query(default=600, ge=0, le=5
         }
 
 
+@app.post("/api/sessions/{session_id}/review", response_model=SessionOut)
+def review_session(session_id: int, payload: SessionReview) -> SessionOut:
+    """아침에 남기는 수면 평가(별점 + 특이사항). 다시 보내면 덮어쓴다."""
+    with db.session_scope() as conn:
+        row = conn.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "세션을 찾을 수 없습니다.")
+        conn.execute(
+            "UPDATE sessions SET rating=?, note_code=?, note_text=?, reviewed_at=? WHERE session_id=?",
+            (payload.rating, payload.note_code, payload.note_text.strip(), db.now_iso(), session_id),
+        )
+        updated = conn.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+        return SessionOut(**_row_to_dict(updated))
+
+
 # ---------------------------------------------------------------- 브리지 업로드
+@app.post("/api/ingest/announce", response_model=AnnounceResult, dependencies=[Depends(require_ingest_key)])
+def ingest_announce(payload: DeviceAnnounce) -> AnnounceResult:
+    """브리지가 기기 부팅(@ID,...)을 감지했을 때 호출.
+
+    등록된 기기면 접속 시각만 갱신하고, 미등록이면 pending 목록에 올려 앱에서 고를 수 있게 한다.
+    """
+    now = db.now_iso()
+    with db.session_scope() as conn:
+        device = conn.execute(
+            "SELECT * FROM devices WHERE device_id=?", (payload.device_id,)
+        ).fetchone()
+        if device is not None:
+            conn.execute("UPDATE devices SET last_seen_at=? WHERE device_id=?", (now, payload.device_id))
+            return AnnounceResult(
+                device_id=payload.device_id, registered=True, user_id=device["user_id"],
+                detail="등록된 기기",
+            )
+        conn.execute(
+            "INSERT INTO pending_devices(device_id, first_seen_at, last_seen_at, firmware)"
+            " VALUES(?,?,?,?)"
+            " ON CONFLICT(device_id) DO UPDATE SET last_seen_at=excluded.last_seen_at,"
+            " firmware=excluded.firmware",
+            (payload.device_id, now, now, payload.firmware),
+        )
+        return AnnounceResult(
+            device_id=payload.device_id, registered=False, detail="앱에서 이 기기를 등록하세요.",
+        )
+
+
 @app.post("/api/ingest/events", response_model=IngestResult, dependencies=[Depends(require_ingest_key)])
 def ingest_event(payload: EventIn) -> IngestResult:
     """펌웨어의 @FLAG / @RESULT 한 줄을 받아 세션 상태를 갱신한다."""
@@ -369,6 +444,7 @@ def admin_users() -> list[AdminUserRow]:
                       (SELECT COUNT(*) FROM sessions s WHERE s.user_id=u.user_id) AS session_count,
                       (SELECT COUNT(*) FROM sessions s WHERE s.user_id=u.user_id AND s.outcome='onset') AS onset_count,
                       (SELECT AVG(sol_min) FROM sessions s WHERE s.user_id=u.user_id AND s.outcome='onset') AS avg_sol,
+                      (SELECT AVG(rating) FROM sessions s WHERE s.user_id=u.user_id) AS avg_rating,
                       (SELECT MAX(started_at) FROM sessions s WHERE s.user_id=u.user_id) AS last_session_at
                  FROM users u ORDER BY u.created_at DESC"""
         ).fetchall()
@@ -378,6 +454,7 @@ def admin_users() -> list[AdminUserRow]:
                 device_count=r["device_count"], session_count=r["session_count"],
                 onset_count=r["onset_count"],
                 avg_sol_min=round(r["avg_sol"], 2) if r["avg_sol"] is not None else None,
+                avg_rating=round(r["avg_rating"], 2) if r["avg_rating"] is not None else None,
                 last_session_at=r["last_session_at"],
             )
             for r in rows
@@ -408,7 +485,7 @@ def admin_export_sessions(user_id: Optional[str] = None) -> PlainTextResponse:
     """세션 단위 CSV 내보내기(엑셀/논문용)."""
     query = (
         "SELECT session_id, user_id, device_id, started_at, ended_at, target_temp_c,"
-        " resting_bpm, threshold_bpm, sol_min, outcome FROM sessions"
+        " resting_bpm, threshold_bpm, sol_min, outcome, rating, note_code, note_text FROM sessions"
     )
     params: tuple[Any, ...] = ()
     if user_id:
@@ -420,7 +497,8 @@ def admin_export_sessions(user_id: Optional[str] = None) -> PlainTextResponse:
     writer = csv.writer(buf)
     writer.writerow(
         ["session_id", "user_id", "device_id", "started_at", "ended_at",
-         "target_temp_c", "resting_bpm", "threshold_bpm", "sol_min", "outcome"]
+         "target_temp_c", "resting_bpm", "threshold_bpm", "sol_min", "outcome",
+         "rating", "note_code", "note_text"]
     )
     with db.session_scope() as conn:
         for r in conn.execute(query, params).fetchall():

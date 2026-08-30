@@ -2,6 +2,8 @@ import type {
   AdminUserDetail,
   AdminUserRow,
   Device,
+  NoteCode,
+  PendingDevice,
   Session,
   SessionDetail,
   User,
@@ -68,6 +70,9 @@ export const api = {
   registerDevice: (base: string, device_id: string, user_id: string, label: string) =>
     request<Device>(base, '/api/devices', { method: 'POST', body: { device_id, user_id, label } }),
   listDevices: (base: string, userId: string) => request<Device[]>(base, `/api/users/${userId}/devices`),
+  /** 등록되지 않은 채 신호를 보내온 기기들 — 기기 ID 는 칩 MAC 이라 목록에서 고른다 */
+  pendingDevices: (base: string, minutes = 180) =>
+    request<PendingDevice[]>(base, `/api/devices/pending?minutes=${minutes}`),
   unregisterDevice: (base: string, deviceId: string) =>
     request<null>(base, `/api/devices/${deviceId}`, { method: 'DELETE' }),
 
@@ -77,6 +82,12 @@ export const api = {
     request<Session[]>(base, `/api/users/${userId}/sessions?limit=${limit}`),
   sessionDetail: (base: string, sessionId: number) =>
     request<SessionDetail>(base, `/api/sessions/${sessionId}`),
+  /** 아침 수면 평가(별점 + 특이사항) */
+  reviewSession: (base: string, sessionId: number, rating: number, note_code: NoteCode, note_text = '') =>
+    request<Session>(base, `/api/sessions/${sessionId}/review`, {
+      method: 'POST',
+      body: { rating, note_code, note_text },
+    }),
 
   // --- 관리자 페이지 ---
   adminUsers: (base: string, adminToken: string) =>

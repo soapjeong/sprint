@@ -6,6 +6,7 @@ import type { AdminUserDetail } from '@/api/types';
 import { useSettings } from '@/store/settings';
 import { spacing, useTheme } from '@/theme';
 import { TempBarChart } from '@/ui/charts';
+import { ReviewSummary } from '@/ui/review';
 import {
   Body, Caption, Card, ErrorNote, Heading, Loading, OutcomeBadge, Row, Screen, StatTile, Title,
 } from '@/ui/kit';
@@ -61,6 +62,8 @@ export default function AdminUserScreen() {
     .map(([temp, v]) => ({ temp, avgSol: v.sum / v.count, count: v.count }))
     .sort((a, b) => a.temp - b.temp);
   const avgSol = onsets.length ? onsets.reduce((a, s) => a + (s.sol_min ?? 0), 0) / onsets.length : null;
+  const rated = data.sessions.filter((s) => s.rating !== null);
+  const avgRating = rated.length ? rated.reduce((a, s) => a + (s.rating ?? 0), 0) / rated.length : null;
 
   return (
     <Screen>
@@ -74,7 +77,8 @@ export default function AdminUserScreen() {
           <Row>
             <StatTile label="세션" value={String(data.sessions.length)} unit="회" />
             <StatTile label="입면" value={String(onsets.length)} unit="회" />
-            <StatTile label="평균" value={formatMinutes(avgSol)} unit="분" />
+            <StatTile label="평균 SOL" value={formatMinutes(avgSol)} unit="분" />
+            <StatTile label="평균 별점" value={avgRating === null ? '-' : avgRating.toFixed(1)} unit="/ 5" />
           </Row>
           {data.devices.map((d) => (
             <Caption key={d.device_id}>
@@ -106,6 +110,7 @@ export default function AdminUserScreen() {
                   s.resting_bpm ? s.resting_bpm.toFixed(0) : '-'
                 } BPM · 기준 ${s.threshold_bpm ? s.threshold_bpm.toFixed(0) : '-'} BPM`}
               </Caption>
+              <ReviewSummary rating={s.rating} noteCode={s.note_code} noteText={s.note_text} />
             </View>
           ))}
         </Card>

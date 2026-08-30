@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ID_PATTERN = r"^[A-Za-z0-9_.-]{2,32}$"
 
@@ -33,6 +33,9 @@ class DeviceOut(BaseModel):
     last_seen_at: Optional[str] = None
 
 
+NOTE_CODES = ("alcohol", "caffeine", "none", "other")
+
+
 class SessionOut(BaseModel):
     session_id: int
     user_id: str
@@ -44,12 +47,56 @@ class SessionOut(BaseModel):
     threshold_bpm: Optional[float] = None
     sol_min: Optional[float] = None
     outcome: str
+    rating: Optional[int] = None
+    note_code: Optional[str] = None
+    note_text: Optional[str] = None
+    reviewed_at: Optional[str] = None
 
 
 class TempStat(BaseModel):
     target_temp_c: float
     avg_sol_min: float
     onset_count: int
+
+
+class SessionReview(BaseModel):
+    """아침에 사용자가 남기는 수면 평가."""
+
+    rating: int = Field(ge=1, le=5, description="별점 1~5")
+    note_code: str = Field(description="alcohol | caffeine | none | other")
+    note_text: str = Field(default="", max_length=200, description="note_code='other' 일 때 필수")
+
+    @field_validator("note_code")
+    @classmethod
+    def _known_code(cls, v: str) -> str:
+        if v not in NOTE_CODES:
+            raise ValueError(f"note_code 는 {NOTE_CODES} 중 하나여야 합니다.")
+        return v
+
+    @model_validator(mode="after")
+    def _other_needs_text(self) -> "SessionReview":
+        if self.note_code == "other" and not self.note_text.strip():
+            raise ValueError("'기타'를 고르면 내용을 적어야 합니다.")
+        return self
+
+
+class PendingDevice(BaseModel):
+    device_id: str
+    first_seen_at: str
+    last_seen_at: str
+    firmware: str = ""
+
+
+class DeviceAnnounce(BaseModel):
+    device_id: str = Field(pattern=ID_PATTERN)
+    firmware: str = Field(default="", max_length=64)
+
+
+class AnnounceResult(BaseModel):
+    device_id: str
+    registered: bool
+    user_id: Optional[str] = None
+    detail: str = ""
 
 
 class UserSummary(BaseModel):
@@ -62,6 +109,9 @@ class UserSummary(BaseModel):
     best_temp_c: Optional[float] = None
     temp_stats: list[TempStat]
     recent_sessions: list[SessionOut]
+    # 아직 별점을 남기지 않은 가장 최근 세션(있으면 홈 화면에 평가 카드를 띄운다)
+    pending_review: Optional[SessionOut] = None
+    avg_rating: Optional[float] = None
 
 
 class EventIn(BaseModel):
@@ -113,4 +163,5 @@ class AdminUserRow(BaseModel):
     session_count: int
     onset_count: int
     avg_sol_min: Optional[float] = None
+    avg_rating: Optional[float] = None
     last_session_at: Optional[str] = None
