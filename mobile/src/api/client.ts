@@ -52,10 +52,15 @@ async function request<T>(
     return payload as T;
   } catch (err) {
     if (err instanceof ApiError) throw err;
+    const target = normalizeBase(baseUrl);
     if (err instanceof Error && err.name === 'AbortError') {
-      throw new ApiError(0, '서버 응답이 없습니다. 주소와 네트워크를 확인하세요.');
+      throw new ApiError(0, `서버가 응답하지 않습니다 (${target}). 서버가 켜져 있는지 확인하세요.`);
     }
-    throw new ApiError(0, '서버에 연결할 수 없습니다. 주소를 확인하세요.');
+    throw new ApiError(
+      0,
+      `서버에 연결할 수 없습니다 (${target}).\n` +
+        'PC 에서 `python server/run.py` 로 서버를 켰는지, 주소가 맞는지 확인하세요.',
+    );
   } finally {
     clearTimeout(timer);
   }

@@ -25,7 +25,8 @@ export default function OnboardingScreen() {
   const [password, setPassword] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [deviceLabel, setDeviceLabel] = useState('');
-  const [busy, setBusy] = useState<null | 'user' | 'device' | 'scan'>(null);
+  const [busy, setBusy] = useState<null | 'user' | 'device' | 'scan' | 'ping'>(null);
+  const [serverOk, setServerOk] = useState<boolean | null>(null);
   const [found, setFound] = useState<PendingDevice[] | null>(null);
   const [manual, setManual] = useState(false);
   const [error, setError] = useState('');
@@ -92,6 +93,22 @@ export default function OnboardingScreen() {
     }
   }
 
+  /** 주소가 맞는지, 서버가 켜져 있는지 먼저 확인한다. */
+  async function pingServer() {
+    setError('');
+    setBusy('ping');
+    try {
+      await api.health(serverUrl);
+      setServerOk(true);
+      await update({ serverUrl: serverUrl.trim() });
+    } catch (e) {
+      setServerOk(false);
+      setError((e as ApiError).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   /** 기기 ID 는 칩 MAC 에서 만들어지므로 손으로 적지 않고 목록에서 고른다. */
   async function scanDevices() {
     setError('');
@@ -150,11 +167,25 @@ export default function OnboardingScreen() {
             <Field
               label="서버 주소"
               value={serverUrl}
-              onChangeText={setServerUrl}
+              onChangeText={(v) => {
+                setServerUrl(v);
+                setServerOk(null);
+              }}
               placeholder="http://192.168.0.10:8000"
               keyboardType="url"
-              hint="기기 로그를 올리는 백엔드 주소입니다. 같은 Wi-Fi의 PC 주소를 넣으세요."
+              hint={
+                'PC 에서 python server/run.py 를 실행하면 터미널에 찍히는 주소입니다. ' +
+                '브라우저 미리보기는 http://localhost:8000, 폰은 PC 의 LAN 주소를 넣으세요.'
+              }
             />
+            <Button
+              label="서버 연결 확인"
+              variant="secondary"
+              onPress={pingServer}
+              loading={busy === 'ping'}
+            />
+            {serverOk === true ? <Caption>연결됨 · 서버가 정상 동작 중입니다.</Caption> : null}
+            {serverOk === false ? <Caption>연결 실패 · 서버를 켠 뒤 다시 확인해 주세요.</Caption> : null}
           </Card>
 
           <Card>
