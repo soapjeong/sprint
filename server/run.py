@@ -36,7 +36,16 @@ def main() -> None:
     # 로컬 개발 실행기이므로 기본 토큰을 허용한다(컨테이너/클라우드에서는 허용하지 않는다).
     os.environ.setdefault("SLEEP_ALLOW_DEV_TOKENS", "1")
 
-    import uvicorn
+    try:
+        import uvicorn
+    except ModuleNotFoundError:
+        print("=" * 62)
+        print("  필요한 패키지가 설치되어 있지 않습니다.")
+        print("  아래 명령으로 설치한 뒤 다시 실행하세요:")
+        print(f"      {sys.executable} -m pip install -r "
+              f"{ROOT / 'server' / 'requirements.txt'}")
+        print("=" * 62)
+        raise SystemExit(1)
 
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8000"))
