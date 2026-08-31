@@ -20,8 +20,6 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ title: '시작하기' }} />
           <Stack.Screen name="user/home" options={{ title: '내 수면 리포트' }} />
           <Stack.Screen name="user/session/[id]" options={{ title: '세션 상세' }} />
-          <Stack.Screen name="admin/index" options={{ title: '관리자' }} />
-          <Stack.Screen name="admin/[userId]" options={{ title: '사용자 데이터' }} />
         </Stack>
       </SettingsProvider>
     </SafeAreaProvider>

@@ -10,7 +10,6 @@ export type Settings = {
   /** 로그인 후 서버가 준 접근 토큰 */
   userToken: string | null;
   deviceId: string | null;
-  adminToken: string | null;
 };
 
 const defaultServerUrl =
@@ -22,7 +21,6 @@ const initial: Settings = {
   userId: null,
   userToken: null,
   deviceId: null,
-  adminToken: null,
 };
 
 type Ctx = {

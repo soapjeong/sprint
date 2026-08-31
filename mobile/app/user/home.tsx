@@ -206,8 +206,6 @@ export default function UserHomeScreen() {
             }}
           />
         </Card>
-
-        <Button label="관리자 페이지" variant="secondary" onPress={() => router.push('/admin')} />
       </ScrollView>
     </Screen>
   );

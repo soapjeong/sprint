@@ -1,6 +1,4 @@
 import type {
-  AdminUserDetail,
-  AdminUserRow,
   AuthResult,
   Device,
   NoteCode,
@@ -27,7 +25,7 @@ function normalizeBase(baseUrl: string): string {
 async function request<T>(
   baseUrl: string,
   path: string,
-  options: { method?: string; body?: unknown; adminToken?: string; userToken?: string | null } = {},
+  options: { method?: string; body?: unknown; userToken?: string | null } = {},
 ): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -36,7 +34,6 @@ async function request<T>(
       method: options.method ?? 'GET',
       headers: {
         'Content-Type': 'application/json',
-        ...(options.adminToken ? { 'X-Admin-Token': options.adminToken } : {}),
         ...(options.userToken ? { 'X-User-Token': options.userToken } : {}),
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -106,11 +103,5 @@ export const api = {
       method: 'POST',
       userToken,
       body: { rating, note_code, note_text },
-    }),
-
-  // --- 관리자 페이지 ---
-  adminUsers: (base: string, adminToken: string) =>
-    request<AdminUserRow[]>(base, '/api/admin/users', { adminToken }),
-  adminUserDetail: (base: string, adminToken: string, userId: string) =>
-    request<AdminUserDetail>(base, `/api/admin/users/${userId}`, { adminToken }),
+    })
 };

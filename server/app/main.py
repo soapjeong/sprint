@@ -11,11 +11,13 @@ import io
 import csv
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .models import (
@@ -615,6 +617,14 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# 관리자 대시보드(admin-web/)는 사용자 앱과 완전히 분리된 별도 사이트다.
+# 여기에 얹어두면 배포가 하나로 끝나지만, 정적 파일이라 다른 곳에 따로 올려도 된다.
+ADMIN_SITE_DIR = Path(__file__).resolve().parent.parent.parent / "admin-web"
+ADMIN_SITE_AVAILABLE = ADMIN_SITE_DIR.is_dir()
+if ADMIN_SITE_AVAILABLE:
+    app.mount("/admin", StaticFiles(directory=ADMIN_SITE_DIR, html=True), name="admin")
+
+
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def index() -> HTMLResponse:
     """브라우저로 서버 주소를 열었을 때 보여주는 상태 페이지.
@@ -625,6 +635,10 @@ def index() -> HTMLResponse:
         users = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
         devices = conn.execute("SELECT COUNT(*) AS n FROM devices").fetchone()["n"]
         sessions = conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"]
+    admin_link = (
+        ' · <a href="/admin/">관리자 대시보드</a>(연구 운영용, 토큰 필요)'
+        if ADMIN_SITE_AVAILABLE else ""
+    )
     return HTMLResponse(f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -659,5 +673,5 @@ def index() -> HTMLResponse:
     <li>앱 첫 화면 <b>서버 주소</b> 칸에 이 PC 의 주소(<code>http://[PC의 LAN IP]:8000</code>)를 입력
         — 주소는 서버를 켠 터미널 맨 위에 찍혀 있습니다</li>
   </ol>
-  <p><a href="/docs">API 문서 열기</a></p>
+  <p><a href="/docs">API 문서 열기</a>{admin_link}</p>
 </main></body></html>""")

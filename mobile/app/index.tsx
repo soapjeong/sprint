@@ -297,8 +297,6 @@ export default function OnboardingScreen() {
             />
             {step !== 'device' ? <Caption>사용자 ID를 먼저 확인해 주세요.</Caption> : null}
           </Card>
-
-          <Button label="관리자 페이지" variant="secondary" onPress={() => router.push('/admin')} />
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>

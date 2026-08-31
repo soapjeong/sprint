@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DormX 관리자</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>DormX 관리자</h1>
+  <span class="tag">연구 운영용</span>
+  <span class="spacer"></span>
+  <span id="server-label" class="hint"></span>
+  <button id="logout" class="secondary" hidden>로그아웃</button>
+</header>
+
+<main>
+  <div id="error" class="error" hidden></div>
+
+  <!-- 로그인 -->
+  <section id="login" class="card">
+    <h2 style="margin-top:0">관리자 인증</h2>
+    <p class="hint">
+      사용자 앱과 분리된 별도 사이트입니다. 서버의 <code>ADMIN_TOKEN</code> 을 아는 사람만 들어올 수 있습니다.
+    </p>
+    <div style="margin-bottom:14px">
+      <label for="server">서버 주소</label>
+      <input id="server" type="url" placeholder="http://localhost:8000">
+    </div>
+    <div style="margin-bottom:14px">
+      <label for="token">관리자 토큰</label>
+      <input id="token" type="password" placeholder="ADMIN_TOKEN">
+    </div>
+    <div class="row">
+      <button id="signin">접속</button>
+      <span class="hint">토큰은 이 브라우저 탭에만 보관되며 닫으면 지워집니다.</span>
+    </div>
+  </section>
+
+  <!-- 사용자 목록 -->
+  <section id="users" hidden>
+    <div class="card">
+      <h2 style="margin-top:0">전체 현황</h2>
+      <div id="totals" class="stats"></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">사용자 ID별 데이터</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>사용자 ID</th><th>이름</th>
+              <th class="num">세션</th><th class="num">입면</th>
+              <th class="num">평균 SOL(분)</th><th class="num">평균 별점</th>
+              <th class="num">기기</th><th>최근 세션</th>
+            </tr>
+          </thead>
+          <tbody id="user-rows"></tbody>
+        </table>
+      </div>
+      <p class="hint" style="margin-bottom:0">행을 누르면 그 사용자의 세션 기록을 볼 수 있습니다.</p>
+    </div>
+  </section>
+
+  <!-- 사용자 상세 -->
+  <section id="detail" hidden>
+    <div class="row" style="margin-bottom:12px">
+      <button id="back" class="secondary">← 목록</button>
+      <button id="export" class="secondary">이 사용자 CSV 내려받기</button>
+    </div>
+    <div class="card">
+      <h2 id="detail-title" style="margin-top:0"></h2>
+      <div id="detail-stats" class="stats"></div>
+      <div id="detail-devices" style="margin-top:12px"></div>
+    </div>
+    <div class="card" id="temp-card">
+      <h2 style="margin-top:0">설정 온도별 평균 잠들기 시간</h2>
+      <figure id="temp-chart"></figure>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">세션 기록</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="num">#</th><th>시작</th><th>결과</th>
+              <th class="num">목표(℃)</th><th class="num">SOL(분)</th>
+              <th class="num">안정심박</th><th class="num">기준</th>
+              <th>별점</th><th>특이사항</th>
+            </tr>
+          </thead>
+          <tbody id="session-rows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">최근 기기 이벤트</h2>
+      <div id="events" class="hint"></div>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

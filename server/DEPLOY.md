@@ -50,6 +50,9 @@ python -c "import secrets; print('ADMIN_TOKEN =', secrets.token_urlsafe(24)); pr
 
 Blueprint 대신 **New + → Web Service → Docker** 로 직접 만들어도 결과는 같다.
 
+관리자 대시보드는 같은 배포에 포함되어 `https://<이름>.onrender.com/admin/` 에서 열린다.
+사용자 앱과는 분리된 사이트이며 관리자 토큰을 아는 사람만 들어갈 수 있다.
+
 ## 4. 앱과 브리지에 새 주소 넣기
 
 **앱**: 첫 화면 서버 주소에 `https://<이름>.onrender.com` 입력 → [서버 연결 확인].

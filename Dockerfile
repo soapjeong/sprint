@@ -11,6 +11,7 @@ COPY server/requirements.txt ./server/requirements.txt
 RUN pip install --no-cache-dir -r server/requirements.txt
 
 COPY server ./server
+COPY admin-web ./admin-web
 
 EXPOSE 8000
 

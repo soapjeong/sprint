@@ -15,7 +15,8 @@ ESP32 기기, PC 브리지, 백엔드, 모바일 앱으로 구성된다.
 | `firmware/` | ESP32 펌웨어 (PID 가온, 안전 감시, 안정심박수 기준 입면 판정) + 하드웨어 없이 도는 로직 테스트 |
 | `serial_csv_logger.py` | PC 브리지 — 시리얼 로그를 CSV 로 저장하고 서버로 업로드 |
 | `server/` | FastAPI 백엔드 — 로그인, 기기 등록, 세션 DB, 관리자 조회 (로컬 SQLite / 배포 PostgreSQL) |
-| `mobile/` | Expo(React Native) 앱 — 사용자 페이지 / 관리자 페이지 |
+| `mobile/` | Expo(React Native) **사용자 앱** — 등록, 수면 리포트, 아침 평가 |
+| `admin-web/` | **관리자 대시보드**(별도 사이트) — 브라우저에서 열고 관리자 토큰으로 접속 |
 | `streamlit_app.py` | 초기 연구용 대시보드(레거시) |
 | `tests/`, `server/tests/` | 브리지 파싱 · API 통합 테스트 |
 

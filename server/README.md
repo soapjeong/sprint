@@ -81,13 +81,22 @@ TEST_DATABASE_URL="postgresql://..." python -m pytest server/tests -q
 | POST | `/api/ingest/events` | `@FLAG` / `@RESULT` 한 줄 → 세션 상태 갱신 |
 | POST | `/api/ingest/samples` | 1초 주기 측정값 배치 |
 
-**관리자** (`X-Admin-Token`)
+**관리자** (`X-Admin-Token`) — 사용자 앱과 분리된 `admin-web/` 대시보드가 쓴다
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | GET | `/api/admin/users` | ID별 세션 수·입면 수·평균 SOL·최근 활동 |
 | GET | `/api/admin/users/{id}` | 해당 ID의 기기/세션/이벤트 전체 |
 | GET | `/api/admin/export/sessions.csv` | 세션 CSV 내보내기(`?user_id=` 필터) |
+
+## 관리자 대시보드
+
+`admin-web/` 의 정적 사이트를 서버가 `/admin/` 에 얹어 서비스한다(`https://<서버>/admin/`).
+사용자 앱에는 관리자 화면이 없고, 앱에서 여기로 넘어가는 경로도 없다.
+토큰은 브라우저 탭 세션에만 보관된다(탭을 닫으면 지워짐).
+
+완전히 다른 곳에 올리고 싶으면 `admin-web/` 폴더만 정적 호스팅에 올리거나
+`python admin-web/serve.py` 로 따로 띄우면 된다(서버 주소는 화면에서 입력).
 
 ## 기기 등록 흐름
 

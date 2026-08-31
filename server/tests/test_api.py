@@ -408,6 +408,14 @@ def test_admin_lists_data_per_user_id(client):
     assert detail["recent_events"][0]["flag"] == "POWER_OFF"
 
 
+def test_admin_dashboard_is_served_separately(client):
+    """관리자 대시보드는 앱과 분리된 별도 사이트로 /admin 에서 열린다."""
+    page = client.get("/admin/")
+    assert page.status_code == 200
+    assert "DormX 관리자" in page.text
+    assert "X-Admin-Token" not in page.text          # 토큰이 페이지에 박혀 있으면 안 된다
+
+
 def test_admin_csv_export(client):
     register(client)
     flag(client, "DORMX-001", "SESSION_START", [39.0])

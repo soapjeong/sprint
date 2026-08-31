@@ -95,22 +95,3 @@ export type SessionEvent = {
 };
 
 export type SessionDetail = { session: Session; samples: Sample[]; events: SessionEvent[] };
-
-export type AdminUserRow = {
-  user_id: string;
-  name: string;
-  created_at: string;
-  device_count: number;
-  session_count: number;
-  onset_count: number;
-  avg_sol_min: number | null;
-  avg_rating: number | null;
-  last_session_at: string | null;
-};
-
-export type AdminUserDetail = {
-  user: User;
-  devices: Device[];
-  sessions: Session[];
-  recent_events: SessionEvent[];
-};
