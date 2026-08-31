@@ -14,7 +14,7 @@ ESP32 기기, PC 브리지, 백엔드, 모바일 앱으로 구성된다.
 |------|------|
 | `firmware/` | ESP32 펌웨어 (PID 가온, 안전 감시, 안정심박수 기준 입면 판정) + 하드웨어 없이 도는 로직 테스트 |
 | `serial_csv_logger.py` | PC 브리지 — 시리얼 로그를 CSV 로 저장하고 서버로 업로드 |
-| `server/` | FastAPI + SQLite 백엔드 (로그인, 기기 등록, 세션 DB, 관리자 조회) |
+| `server/` | FastAPI 백엔드 — 로그인, 기기 등록, 세션 DB, 관리자 조회 (로컬 SQLite / 배포 PostgreSQL) |
 | `mobile/` | Expo(React Native) 앱 — 사용자 페이지 / 관리자 페이지 |
 | `streamlit_app.py` | 초기 연구용 대시보드(레거시) |
 | `tests/`, `server/tests/` | 브리지 파싱 · API 통합 테스트 |
@@ -49,4 +49,10 @@ firmware/test/run_tests.sh               # 펌웨어 로직 (하드웨어 불필
 cd mobile && npm run typecheck           # 앱 타입 검사
 ```
 
-자세한 내용은 `firmware/README.md`, `server/README.md`, `mobile/README.md` 참고.
+## 서버를 무료로 올려두기
+
+PC 를 켜두지 않아도 앱이 돌게 하려면 `server/DEPLOY.md` 참고 —
+Render(웹, 무료) + Neon(PostgreSQL, 무료·기간 제한 없음) 조합이다.
+`DATABASE_URL` 이 있으면 PostgreSQL, 없으면 로컬 SQLite 로 동작한다.
+
+자세한 내용은 `firmware/README.md`, `server/README.md`, `server/DEPLOY.md`, `mobile/README.md` 참고.

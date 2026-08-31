@@ -83,6 +83,13 @@ def test_device_id_comes_from_firmware(captured_upload):
     assert all(p["device_id"] == "DORMX-246F28AABBCC" for path, p in captured_upload)
 
 
+def test_uploads_keep_firmware_order(captured_upload):
+    """세션 시작 이벤트보다 샘플이 먼저 도착하면 서버가 버리므로 순서가 유지돼야 한다."""
+    kinds = [p.rsplit("/", 1)[-1] for p, _ in captured_upload]
+    assert kinds[0] == "announce"
+    assert kinds.index("events") < kinds.index("samples")
+
+
 def test_replay_uploads_events_and_samples(captured_upload):
     events = [p for path, p in captured_upload if path.endswith("/events")]
     samples = [p for path, p in captured_upload if path.endswith("/samples")]

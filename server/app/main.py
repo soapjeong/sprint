@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import io
 import csv
-import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Optional
@@ -80,8 +79,15 @@ LATE_SAMPLE_WINDOW_S = 600
 
 
 # ---------------------------------------------------------------- helpers
-def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def _row_to_dict(row: Any) -> dict[str, Any]:
     return {k: row[k] for k in row.keys()}
+
+
+def _num(value: Any, digits: int | None = None) -> Optional[float]:
+    """집계 결과를 float 으로 통일한다(PostgreSQL 의 AVG 는 Decimal 을 준다)."""
+    if value is None:
+        return None
+    return round(float(value), digits) if digits is not None else float(value)
 
 
 def current_user(x_user_token: str = Header(default="")) -> str:
@@ -103,7 +109,7 @@ def _require_self(caller: str, user_id: str) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "다른 사용자의 데이터에는 접근할 수 없습니다.")
 
 
-def _issue_token(conn: sqlite3.Connection, user_id: str) -> str:
+def _issue_token(conn: Any, user_id: str) -> str:
     token = new_access_token()
     conn.execute(
         "INSERT INTO auth_tokens(token, user_id, created_at) VALUES(?,?,?)",
@@ -112,28 +118,28 @@ def _issue_token(conn: sqlite3.Connection, user_id: str) -> str:
     return token
 
 
-def _get_user(conn: sqlite3.Connection, user_id: str) -> sqlite3.Row:
+def _get_user(conn: Any, user_id: str) -> Any:
     row = conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"등록되지 않은 사용자입니다: {user_id}")
     return row
 
 
-def _get_device(conn: sqlite3.Connection, device_id: str) -> sqlite3.Row:
+def _get_device(conn: Any, device_id: str) -> Any:
     row = conn.execute("SELECT * FROM devices WHERE device_id=?", (device_id,)).fetchone()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"등록되지 않은 기기입니다: {device_id}")
     return row
 
 
-def _open_session(conn: sqlite3.Connection, device_id: str) -> Optional[sqlite3.Row]:
+def _open_session(conn: Any, device_id: str) -> Optional[Any]:
     return conn.execute(
         "SELECT * FROM sessions WHERE device_id=? AND ended_at IS NULL ORDER BY session_id DESC LIMIT 1",
         (device_id,),
     ).fetchone()
 
 
-def _session_for_samples(conn: sqlite3.Connection, device_id: str) -> Optional[sqlite3.Row]:
+def _session_for_samples(conn: Any, device_id: str) -> Optional[Any]:
     """진행 중인 세션, 없으면 방금(LATE_SAMPLE_WINDOW_S 이내) 끝난 세션.
 
     브리지가 샘플을 배치로 올리기 때문에 세션 종료 이벤트보다 늦게 도착하는 묶음이 있다.
@@ -272,7 +278,7 @@ def unregister_device(device_id: str, caller: str = Depends(current_user)) -> No
 
 
 # ---------------------------------------------------------------- 사용자 페이지 조회
-def _session_rows(conn: sqlite3.Connection, user_id: str, limit: int) -> list[SessionOut]:
+def _session_rows(conn: Any, user_id: str, limit: int) -> list[SessionOut]:
     rows = conn.execute(
         "SELECT * FROM sessions WHERE user_id=? ORDER BY session_id DESC LIMIT ?",
         (user_id, limit),
@@ -323,8 +329,8 @@ def user_summary(user_id: str, caller: str = Depends(current_user)) -> UserSumma
         ).fetchone()
         stats = [
             TempStat(
-                target_temp_c=r["target_temp_c"],
-                avg_sol_min=round(r["avg_sol"], 2),
+                target_temp_c=_num(r["target_temp_c"]) or 0.0,
+                avg_sol_min=_num(r["avg_sol"], 2) or 0.0,
                 onset_count=r["n"],
             )
             for r in conn.execute(
@@ -341,13 +347,13 @@ def user_summary(user_id: str, caller: str = Depends(current_user)) -> UserSumma
             devices=devices,
             session_count=agg["n"] or 0,
             onset_count=agg["onsets"] or 0,
-            avg_sol_min=round(agg["avg_sol"], 2) if agg["avg_sol"] is not None else None,
-            best_sol_min=agg["best_sol"],
+            avg_sol_min=_num(agg["avg_sol"], 2),
+            best_sol_min=_num(agg["best_sol"]),
             best_temp_c=best_temp,
             temp_stats=stats,
             recent_sessions=_session_rows(conn, user_id, 10),
             pending_review=SessionOut(**_row_to_dict(pending)) if pending else None,
-            avg_rating=round(agg["avg_rating"], 2) if agg["avg_rating"] is not None else None,
+            avg_rating=_num(agg["avg_rating"], 2),
         )
 
 
@@ -444,12 +450,13 @@ def ingest_event(payload: EventIn) -> IngestResult:
                     " WHERE session_id=?",
                     (now, session["session_id"]),
                 )
-            cur = conn.execute(
+            session_id = db.insert_returning_id(
+                conn,
                 "INSERT INTO sessions(user_id, device_id, started_at, device_start_ms, target_temp_c)"
                 " VALUES(?,?,?,?,?)",
                 (user_id, payload.device_id, now, payload.device_ms, _value(payload.values, 0)),
+                "session_id",
             )
-            session_id = int(cur.lastrowid)
             detail = "세션 시작"
         else:
             session_id = int(session["session_id"]) if session else None
@@ -550,8 +557,8 @@ def admin_users() -> list[AdminUserRow]:
                 user_id=r["user_id"], name=r["name"], created_at=r["created_at"],
                 device_count=r["device_count"], session_count=r["session_count"],
                 onset_count=r["onset_count"],
-                avg_sol_min=round(r["avg_sol"], 2) if r["avg_sol"] is not None else None,
-                avg_rating=round(r["avg_rating"], 2) if r["avg_rating"] is not None else None,
+                avg_sol_min=_num(r["avg_sol"], 2),
+                avg_rating=_num(r["avg_rating"], 2),
                 last_session_at=r["last_session_at"],
             )
             for r in rows

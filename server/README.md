@@ -1,4 +1,8 @@
-# 백엔드 API 서버 (FastAPI + SQLite)
+# 백엔드 API 서버 (FastAPI)
+
+데이터베이스는 두 가지를 지원한다. `DATABASE_URL` 이 있으면 **PostgreSQL**(배포용),
+없으면 `SLEEP_DB_PATH` 의 **SQLite 파일**(로컬 개발). 질의는 한 벌만 쓰고 엔진 차이는
+`server/app/db.py` 가 흡수한다. 무료 배포 절차는 [DEPLOY.md](DEPLOY.md).
 
 앱의 사용자 페이지/관리자 페이지가 같이 쓰는 서버. ESP32 로그는 PC 시리얼 브리지를 통해 올라온다.
 
@@ -25,7 +29,7 @@ ADMIN_TOKEN=... INGEST_API_KEY=... \
   uvicorn server.app.main:app --host 0.0.0.0 --port 8000
 ```
 
-- DB 파일 위치: `SLEEP_DB_PATH` (기본 `server/data/sleep.db`)
+- DB 위치: `DATABASE_URL`(PostgreSQL) 또는 `SLEEP_DB_PATH`(SQLite, 기본 `server/data/sleep.db`)
 - 앱에서 접속할 주소는 PC의 LAN IP (`http://192.168.0.x:8000`). `localhost` 는 폰에서 열리지 않는다.
 - 대화형 API 문서: `http://<서버>:8000/docs`
 
@@ -43,6 +47,12 @@ ADMIN_TOKEN=... INGEST_API_KEY=... \
 - 기본 토큰(`dev-admin-token` / `dev-ingest-key`)으로는 서버가 기동을 거부한다.
   `server/run.py` 로 실행하면 로컬 개발로 보고 자동 허용한다(`SLEEP_ALLOW_DEV_TOKENS=1`).
   같은 Wi-Fi 를 여럿이 쓰는 곳이라면 토큰을 직접 정해서 실행하는 편이 안전하다.
+
+## 테스트를 PostgreSQL 로도 돌리기
+
+```bash
+TEST_DATABASE_URL="postgresql://..." python -m pytest server/tests -q
+```
 
 ## 엔드포인트
 

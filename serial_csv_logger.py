@@ -150,10 +150,17 @@ def status_row_for_csv(line):
 
 
 # ---------------------------------------------------------------- 서버 업로드
+# 무료 호스팅은 유휴 상태에서 잠들었다가 첫 요청에 1분 가까이 걸리기도 한다.
+RETRY_DELAYS = (2, 5, 15, 30)
 class ServerUploader:
-    """샘플은 모아서, 이벤트는 즉시 서버로 올린다. 실패해도 로깅은 계속된다."""
+    """서버 업로드 담당.
 
-    def __init__(self, base_url, api_key, device_id, batch=20, flush_interval=5.0, timeout=5.0):
+    샘플과 이벤트를 **하나의 큐에 순서대로** 넣고 한 스레드가 차례로 보낸다.
+    (세션 시작 이벤트보다 샘플이 먼저 도착하면 서버가 버리기 때문에 순서가 중요하다.)
+    실패해도 로깅은 계속되며, 잠들어 있는 서버는 재시도로 깨운다.
+    """
+
+    def __init__(self, base_url, api_key, device_id, batch=20, flush_interval=5.0, timeout=15.0):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.device_id = device_id
@@ -162,7 +169,7 @@ class ServerUploader:
         self.timeout = timeout
         self._samples = []
         self._lock = threading.Lock()
-        self._events = queue.Queue()
+        self._queue = queue.Queue()
         self._stop = threading.Event()
         self._threads = []
         self.failures = 0
@@ -179,34 +186,36 @@ class ServerUploader:
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
-    def _post_safe(self, path, payload, label):
-        try:
-            self._post(path, payload)
-            return True
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:200]
-            print(f"[업로드 실패] {label} HTTP {exc.code} {detail}")
-        except Exception as exc:                      # 네트워크 단절 등
-            print(f"[업로드 실패] {label} {exc}")
+    def _post_safe(self, path, payload, label, retries=0):
+        delays = RETRY_DELAYS[:retries]
+        for attempt in range(retries + 1):
+            try:
+                self._post(path, payload)
+                if attempt:
+                    print(f"[업로드 성공] {label} (재시도 {attempt}회)")
+                return True
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")[:200]
+                print(f"[업로드 실패] {label} HTTP {exc.code} {detail}")
+                if exc.code < 500:            # 400 대는 다시 보내도 같은 결과다
+                    break
+            except Exception as exc:          # 네트워크 단절, 서버 기동 대기 등
+                print(f"[업로드 실패] {label} {exc}")
+            if attempt < len(delays):
+                wait = delays[attempt]
+                print(f"  → {wait}초 후 재시도합니다({attempt + 1}/{retries}).")
+                if self._stop.wait(wait):
+                    break
         self.failures += 1
         return False
 
     # --- 외부 API ---
     def start(self):
-        t = threading.Thread(target=self._sample_loop, daemon=True)
-        e = threading.Thread(target=self._event_loop, daemon=True)
-        self._threads = [t, e]
-        t.start()
-        e.start()
-
-    def add_sample(self, sample):
-        if not self.device_id:            # 기기 ID 를 아직 모르면 보낼 곳이 없다
-            return
-        with self._lock:
-            self._samples.append(sample)
-            ready = len(self._samples) >= self.batch
-        if ready:
-            self.flush_samples()
+        worker = threading.Thread(target=self._worker, daemon=True)
+        timer = threading.Thread(target=self._flush_loop, daemon=True)
+        self._threads = [worker, timer]
+        worker.start()
+        timer.start()
 
     def set_device_id(self, device_id):
         """기기가 알려준 ID 로 갈아탄다(수동 지정한 값이 없을 때만)."""
@@ -217,55 +226,75 @@ class ServerUploader:
         return True
 
     def announce(self, device_id, firmware=""):
-        self._post_safe(
-            "/api/ingest/announce",
-            {"device_id": device_id, "firmware": firmware},
-            f"announce {device_id}",
-        )
+        # 잠들어 있는 무료 호스팅을 깨우는 첫 요청이라 넉넉히 기다린다
+        self._queue.put(("announce", {"device_id": device_id, "firmware": firmware}))
+
+    def add_sample(self, sample):
+        if not self.device_id:            # 기기 ID 를 아직 모르면 보낼 곳이 없다
+            return
+        with self._lock:
+            self._samples.append(sample)
+            ready = len(self._samples) >= self.batch
+        if ready:
+            self.flush_samples()
 
     def add_event(self, event):
-        # 이벤트(세션 시작/종료 등)는 즉시 올라가므로, 그 전에 쌓인 샘플을 먼저 비워
-        # "세션이 닫힌 뒤 도착한 샘플"이 생기지 않게 한다.
+        # 이벤트보다 앞서 측정된 샘플이 뒤늦게 도착하지 않도록 먼저 큐에 넣는다
         self.flush_samples()
-        self._events.put(event)
+        self._queue.put(("event", dict(event)))
 
     def flush_samples(self):
         with self._lock:
             pending, self._samples = self._samples, []
-        if not pending or not self.device_id:
-            return
-        ok = self._post_safe(
-            "/api/ingest/samples",
-            {"device_id": self.device_id, "samples": pending},
-            f"samples x{len(pending)}",
-        )
-        if not ok:                                    # 다음 주기에 다시 시도
-            with self._lock:
-                self._samples = pending[-200:] + self._samples
+        if pending and self.device_id:
+            self._queue.put(("samples", pending))
 
-    def _sample_loop(self):
-        while not self._stop.wait(self.flush_interval):
-            self.flush_samples()
-
-    def _event_loop(self):
+    # --- 전송 스레드 ---
+    def _worker(self):
         while True:
             try:
-                event = self._events.get(timeout=0.5)
+                kind, payload = self._queue.get(timeout=0.5)
             except queue.Empty:
                 if self._stop.is_set():
                     return
                 continue
             if not self.device_id:
                 continue
-            payload = dict(event)
-            payload["device_id"] = self.device_id
-            self._post_safe("/api/ingest/events", payload, f"event {event['flag']}")
+            if kind == "samples":
+                self._post_safe(
+                    "/api/ingest/samples",
+                    {"device_id": self.device_id, "samples": payload},
+                    f"samples x{len(payload)}",
+                    retries=1,
+                )
+            elif kind == "event":
+                # 이벤트를 놓치면 그 세션 데이터 전체가 버려지므로 끈질기게 재시도한다
+                body = dict(payload)
+                body["device_id"] = self.device_id
+                self._post_safe(
+                    "/api/ingest/events", body, f"event {payload['flag']}", retries=len(RETRY_DELAYS)
+                )
+            elif kind == "announce":
+                self._post_safe(
+                    "/api/ingest/announce",
+                    payload,
+                    f"announce {payload['device_id']}",
+                    retries=len(RETRY_DELAYS),
+                )
+
+    def _flush_loop(self):
+        while not self._stop.wait(self.flush_interval):
+            self.flush_samples()
 
     def close(self):
         self.flush_samples()
+        # 큐에 남은 것을 모두 보낼 시간을 준다
+        deadline = time.time() + 30
+        while not self._queue.empty() and time.time() < deadline:
+            time.sleep(0.1)
         self._stop.set()
         for t in self._threads:
-            t.join(timeout=2.0)
+            t.join(timeout=5.0)
 
 
 # ---------------------------------------------------------------- 시리얼 로거

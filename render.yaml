@@ -1,0 +1,17 @@
+# Render Blueprint — 저장소를 연결하면 이 설정으로 서비스를 만든다.
+#   1) https://dashboard.render.com/blueprints 에서 이 저장소 선택
+#   2) DATABASE_URL 에 Neon 연결 문자열, ADMIN_TOKEN / INGEST_API_KEY 에 직접 만든 값 입력
+services:
+  - type: web
+    name: dormx-sleep-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL      # Neon 등 외부 PostgreSQL 연결 문자열 (필수)
+        sync: false
+      - key: ADMIN_TOKEN       # 관리자 페이지 토큰 (필수)
+        sync: false
+      - key: INGEST_API_KEY    # 브리지 업로드 키 (필수)
+        sync: false

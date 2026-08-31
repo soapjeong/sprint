@@ -20,12 +20,28 @@ ADMIN = {"X-Admin-Token": "dev-admin-token"}
 PASSWORD = "sleep-pass-1"
 
 
+def _reset_postgres(url: str) -> None:
+    """PostgreSQL 로 테스트할 때는 매 테스트마다 스키마를 비운다."""
+    import psycopg
+
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute("DROP SCHEMA public CASCADE")
+        conn.execute("CREATE SCHEMA public")
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    path = str(tmp_path / "test.db")
-    monkeypatch.setattr(db, "DB_PATH", path)
+    # TEST_DATABASE_URL 을 주면 같은 테스트를 PostgreSQL 로도 돌린다.
+    url = os.environ.get("TEST_DATABASE_URL", "")
+    monkeypatch.setattr(db, "DATABASE_URL", url)
     monkeypatch.setenv("SLEEP_ALLOW_DEV_TOKENS", "1")
-    db.init_db(path)
+    if url:
+        _reset_postgres(url)
+        db.init_db()
+    else:
+        path = str(tmp_path / "test.db")
+        monkeypatch.setattr(db, "DB_PATH", path)
+        db.init_db(path)
     with TestClient(app) as c:
         c.user_headers = {}          # type: ignore[attr-defined]
         yield c
