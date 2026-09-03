@@ -2,7 +2,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const state = { server: '', token: '', users: [] };
+const state = { server: '', token: '', users: [], activeIndex: 0 };
 
 const NOTE_LABEL = {
   alcohol: '음주',
@@ -115,67 +115,111 @@ function tempBarChart(bars) {
 // ---------------------------------------------------------------- 화면
 function showSection(name) {
   $('login').hidden = name !== 'login';
-  $('users').hidden = name !== 'users';
-  $('detail').hidden = name !== 'detail';
+  $('workspace').hidden = name !== 'workspace';
   $('logout').hidden = name === 'login';
   $('server-label').textContent = name === 'login' ? '' : normalizeBase(state.server);
 }
 
+/** 사용자별 탭 — 한 명씩 눌러가며 본다 */
+function renderTabs() {
+  $('tabs').innerHTML = state.users
+    .map((u, i) => `
+      <button class="tab" role="tab" data-user="${u.user_id}"
+              aria-selected="${i === state.activeIndex}">
+        ${u.user_id}<span class="count">${u.session_count}회</span>
+      </button>`)
+    .join('');
+  document.querySelectorAll('#tabs .tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.activeIndex = state.users.findIndex((u) => u.user_id === btn.dataset.user);
+      renderTabs();
+      loadUser(btn.dataset.user);
+    });
+  });
+}
+
 async function loadUsers() {
   showError('');
-  const rows = await api('/api/admin/users');
-  state.users = rows;
-  const totals = rows.reduce(
-    (acc, r) => ({
-      sessions: acc.sessions + r.session_count,
-      onsets: acc.onsets + r.onset_count,
-    }),
+  state.users = await api('/api/admin/users');
+  const totals = state.users.reduce(
+    (acc, r) => ({ sessions: acc.sessions + r.session_count, onsets: acc.onsets + r.onset_count }),
     { sessions: 0, onsets: 0 },
   );
   $('totals').innerHTML =
-    statTile('등록 사용자', rows.length, '명') +
+    statTile('등록 사용자', state.users.length, '명') +
     statTile('누적 세션', totals.sessions, '회') +
     statTile('입면 성공', totals.onsets, '회');
 
-  $('user-rows').innerHTML = rows.length
-    ? rows.map((r) => `
-        <tr class="clickable" data-user="${r.user_id}">
-          <td>${r.user_id}</td>
-          <td>${r.name || '<span class="muted">-</span>'}</td>
-          <td class="num">${r.session_count}</td>
-          <td class="num">${r.onset_count}</td>
-          <td class="num">${fmtNum(r.avg_sol_min)}</td>
-          <td class="num">${r.avg_rating ? Number(r.avg_rating).toFixed(1) : '-'}</td>
-          <td class="num">${r.device_count}</td>
-          <td>${fmtDateTime(r.last_session_at)}</td>
-        </tr>`).join('')
-    : '<tr><td colspan="8" class="muted">아직 등록된 사용자가 없습니다.</td></tr>';
-
-  document.querySelectorAll('#user-rows tr.clickable').forEach((tr) => {
-    tr.addEventListener('click', () => loadDetail(tr.dataset.user));
-  });
-  showSection('users');
+  showSection('workspace');
+  if (state.users.length === 0) {
+    $('tabs').innerHTML = '';
+    $('user-panel').innerHTML = '<div class="card"><p class="muted">아직 등록된 사용자가 없습니다.</p></div>';
+    return;
+  }
+  if (state.activeIndex >= state.users.length) state.activeIndex = 0;
+  renderTabs();
+  await loadUser(state.users[state.activeIndex].user_id);
 }
 
-async function loadDetail(userId) {
+/** 요구된 다섯 가지를 한 표에 담는다:
+ *  1) 입면 성공 여부 2) start 누른 시간 3) 입면 성공 시간
+ *  4) 사용자의 평점 및 특이사항 5) 목표 온도와 안정심박수 */
+function sessionTable(sessions) {
+  if (!sessions.length) return '<p class="muted">세션 기록이 없습니다.</p>';
+  const rows = sessions.map((s) => {
+    const ok = s.outcome === 'onset';
+    const verdict = ok
+      ? '<span class="outcome-yes">성공</span>'
+      : s.outcome === 'no_onset'
+        ? '<span class="outcome-no">실패(60분)</span>'
+        : `<span class="outcome-etc">${OUTCOME[s.outcome] ? OUTCOME[s.outcome].label : s.outcome}</span>`;
+    const note = s.note_code
+      ? (NOTE_LABEL[s.note_code] || s.note_code) +
+        (s.note_code === 'other' && s.note_text ? ` (${s.note_text})` : '')
+      : '<span class="muted">-</span>';
+    return `
+      <tr>
+        <td class="num">${s.session_id}</td>
+        <td>${verdict}</td>
+        <td>${fmtDateTime(s.started_at)}</td>
+        <td>${ok ? fmtDateTime(s.onset_at) : '<span class="muted">-</span>'}</td>
+        <td class="num">${ok ? fmtNum(s.sol_min) : '-'}</td>
+        <td>${stars(s.rating)}</td>
+        <td>${note}</td>
+        <td class="num">${fmtNum(s.target_temp_c)}</td>
+        <td class="num">${fmtNum(s.resting_bpm, 0)}</td>
+      </tr>`;
+  }).join('');
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="num">#</th>
+            <th>입면 성공</th>
+            <th>시작 누른 시간</th>
+            <th>입면 성공 시간</th>
+            <th class="num">SOL(분)</th>
+            <th>평점</th>
+            <th>특이사항</th>
+            <th class="num">목표 온도(℃)</th>
+            <th class="num">안정심박(BPM)</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+async function loadUser(userId) {
   showError('');
+  $('user-panel').innerHTML = '<div class="card"><p class="hint">불러오는 중…</p></div>';
   const data = await api(`/api/admin/users/${encodeURIComponent(userId)}`);
   const sessions = data.sessions;
   const onsets = sessions.filter((s) => s.outcome === 'onset' && s.sol_min !== null);
   const rated = sessions.filter((s) => s.rating);
   const avgSol = onsets.length ? onsets.reduce((a, s) => a + s.sol_min, 0) / onsets.length : null;
   const avgRating = rated.length ? rated.reduce((a, s) => a + s.rating, 0) / rated.length : null;
-
-  $('detail-title').textContent = `${data.user.user_id}${data.user.name ? ` · ${data.user.name}` : ''}`;
-  $('detail-stats').innerHTML =
-    statTile('세션', sessions.length, '회') +
-    statTile('입면 성공', onsets.length, '회') +
-    statTile('평균 SOL', fmtNum(avgSol), '분') +
-    statTile('평균 별점', avgRating ? avgRating.toFixed(1) : '-', '/ 5');
-  $('detail-devices').innerHTML = data.devices.length
-    ? data.devices.map((d) => `<div class="hint">기기 ${d.device_id}${d.label ? ` (${d.label})` : ''}
-        · 마지막 통신 ${fmtDateTime(d.last_seen_at)}</div>`).join('')
-    : '<div class="hint">등록된 기기가 없습니다.</div>';
 
   const byTemp = new Map();
   onsets.forEach((s) => {
@@ -186,49 +230,41 @@ async function loadDetail(userId) {
   const bars = [...byTemp.entries()]
     .map(([temp, v]) => ({ temp, avg: v.sum / v.count, count: v.count }))
     .sort((a, b) => a.temp - b.temp);
-  $('temp-chart').innerHTML = tempBarChart(bars);
 
-  $('session-rows').innerHTML = sessions.length
-    ? sessions.map((s) => `
-        <tr>
-          <td class="num">${s.session_id}</td>
-          <td>${fmtDateTime(s.started_at)}</td>
-          <td>${outcomeBadge(s.outcome)}</td>
-          <td class="num">${fmtNum(s.target_temp_c)}</td>
-          <td class="num">${fmtNum(s.sol_min)}</td>
-          <td class="num">${fmtNum(s.resting_bpm, 0)}</td>
-          <td class="num">${fmtNum(s.threshold_bpm, 0)}</td>
-          <td>${stars(s.rating)}</td>
-          <td>${s.note_code ? (NOTE_LABEL[s.note_code] || s.note_code) +
-              (s.note_code === 'other' && s.note_text ? ` (${s.note_text})` : '') : '<span class="muted">-</span>'}</td>
-        </tr>`).join('')
-    : '<tr><td colspan="9" class="muted">세션 데이터가 없습니다.</td></tr>';
+  $('user-panel').innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2 style="margin:0 0 6px">${data.user.user_id}${data.user.name && data.user.name !== data.user.user_id ? ` · ${data.user.name}` : ''}</h2>
+          <p class="hint" style="margin:0">가입 ${fmtDateTime(data.user.created_at)}</p>
+        </div>
+        <button id="export" class="secondary">CSV 내려받기</button>
+      </div>
+      <div class="stats" style="margin-top:14px">
+        ${statTile('세션', sessions.length, '회')}
+        ${statTile('입면 성공', onsets.length, '회')}
+        ${statTile('평균 SOL', fmtNum(avgSol), '분')}
+        ${statTile('평균 별점', avgRating ? avgRating.toFixed(1) : '-', '/ 5')}
+      </div>
+      <div style="margin-top:12px">
+        ${data.devices.map((d) => `<div class="hint">기기 ${d.device_id}${d.label ? ` (${d.label})` : ''}
+          · 연결 ${d.link_state || 'unknown'} · 마지막 통신 ${fmtDateTime(d.last_seen_at)}</div>`).join('')
+          || '<div class="hint">등록된 기기가 없습니다.</div>'}
+      </div>
+    </div>
 
-  $('events').innerHTML = data.recent_events.slice(0, 20)
-    .map((e) => `${fmtDateTime(e.recorded_at)} · ${e.flag}${e.v1 !== null ? ` (${Number(e.v1).toFixed(1)})` : ''}`)
-    .join('<br>') || '기록된 이벤트가 없습니다.';
+    <div class="card">
+      <h2 style="margin-top:0">세션 기록</h2>
+      ${sessionTable(sessions)}
+    </div>
 
-  $('export').onclick = () => downloadCsv(userId);
-  showSection('detail');
-}
+    <div class="card">
+      <h2 style="margin-top:0">설정 온도별 평균 잠들기 시간</h2>
+      <figure>${tempBarChart(bars)}</figure>
+    </div>`;
 
-async function downloadCsv(userId) {
-  showError('');
-  try {
-    const res = await fetch(
-      `${normalizeBase(state.server)}/api/admin/export/sessions.csv?user_id=${encodeURIComponent(userId)}`,
-      { headers: { 'X-Admin-Token': state.token } },
-    );
-    if (!res.ok) throw new Error(`내려받기 실패 (HTTP ${res.status})`);
-    const blob = await res.blob();
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `sessions_${userId}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-  } catch (err) {
-    showError(err.message);
-  }
+  const button = document.getElementById('export');
+  if (button) button.onclick = () => downloadCsv(userId);
 }
 
 // ---------------------------------------------------------------- 진입
@@ -277,5 +313,4 @@ window.addEventListener('DOMContentLoaded', () => {
   $('signin').addEventListener('click', signIn);
   $('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') signIn(); });
   $('logout').addEventListener('click', signOut);
-  $('back').addEventListener('click', () => loadUsers().catch((err) => showError(err.message)));
 });

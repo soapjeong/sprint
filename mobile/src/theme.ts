@@ -1,50 +1,54 @@
-import { useColorScheme } from 'react-native';
-
 /**
- * 앱 전역 색상. 차트 색은 dataviz 팔레트의 검증된 값(밝은/어두운 모드 각각 별도 선택).
- *  - series1(파랑)  : 기본 데이터 계열
- *  - series2(아쿠아): "최적" 강조 (색만으로 구분하지 않고 항상 라벨을 함께 표시)
+ * 밤하늘 테마 — 깊은 남색 배경에 달빛/별빛 포인트.
+ * 화면이 어두운 방에서 자기 전에 열리는 앱이라 다크 톤 한 가지로만 간다(모드 전환 없음).
  */
-export const lightTheme = {
-  mode: 'light' as const,
-  bg: '#f4f4f2',
-  surface: '#fcfcfb',
-  surfaceAlt: '#eeeeea',
-  border: '#dcdcd6',
-  textPrimary: '#0b0b0b',
-  textSecondary: '#52514e',
-  textMuted: '#83827c',
-  accent: '#2a78d6',
-  series1: '#2a78d6',
-  series2: '#1baf7a',
-  danger: '#e34948',
-  warning: '#eda100',
-  grid: '#e3e3dd',
-  onAccent: '#ffffff',
+export const theme = {
+  // 배경: 위에서 아래로 짙어지는 밤하늘
+  bgTop: '#141c44',
+  bg: '#0d1330',
+  bgDeep: '#080c22',
+
+  surface: '#1b2450',        // 카드
+  surfaceAlt: '#242e63',     // 카드 안 타일
+  surfaceSoft: '#2b356f',    // 눌림/보조
+  border: '#2f3a72',
+
+  textPrimary: '#f4f6ff',
+  textSecondary: '#c2caf0',
+  textMuted: '#8b96c8',
+
+  moon: '#ffd88a',           // 달빛 — 주요 강조(숫자, 링크)
+  star: '#9fc0ff',           // 별빛 — 보조 강조(목표 온도 타일)
+  mint: '#6fe0b4',           // 좋음/연결됨
+  amber: '#ffc46b',          // 주의(전원·배터리)
+  coral: '#ff8fa6',          // 문제(연결 안 됨)
+  onAccent: '#12183a',
 };
 
-export const darkTheme: typeof lightTheme = {
-  mode: 'dark' as unknown as 'light',
-  bg: '#121211',
-  surface: '#1a1a19',
-  surfaceAlt: '#242423',
-  border: '#33332f',
-  textPrimary: '#ffffff',
-  textSecondary: '#c3c2b7',
-  textMuted: '#8f8e85',
-  accent: '#3987e5',
-  series1: '#3987e5',
-  series2: '#199e70',
-  danger: '#e66767',
-  warning: '#c98500',
-  grid: '#2c2c2a',
-  onAccent: '#ffffff',
-};
+export type Theme = typeof theme;
 
-export type Theme = typeof lightTheme;
+/** 둥글둥글하게 — 카드는 크게, 버튼은 알약처럼 */
+export const radius = { tile: 22, card: 28, pill: 999, sheet: 34 };
+export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 22, xxl: 30 };
+
+/** 그림자도 남색으로 (검정 그림자는 밤하늘에서 탁해 보인다) */
+export const shadow = {
+  card: {
+    shadowColor: '#03061a',
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  glow: {
+    shadowColor: '#8fb3ff',
+    shadowOpacity: 0.45,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 10,
+  },
+};
 
 export function useTheme(): Theme {
-  return useColorScheme() === 'dark' ? darkTheme : lightTheme;
+  return theme;
 }
-
-export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 };

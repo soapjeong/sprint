@@ -135,3 +135,75 @@ def test_uploaded_payloads_are_accepted_by_server(tmp_path, monkeypatch, capture
         assert detail["session"]["threshold_bpm"] == 56.0
         assert detail["session"]["ended_at"] is not None
         assert len(detail["samples"]) == 6
+
+
+# ---------------------------------------------------------------- 앱 명령 / 연결 상태
+class FakeSerial:
+    def __init__(self, ok=True):
+        self.is_open = True
+        self.ok = ok
+        self.written = []
+
+    def write(self, data):
+        if not self.ok:
+            raise OSError("포트가 닫혔습니다")
+        self.written.append(data.decode())
+
+
+def make_logger(tmp_path, **kwargs):
+    return bridge.SerialCsvLogger(None, 115200, str(tmp_path), replay=None, **kwargs)
+
+
+def test_link_state_distinguishes_cable_and_power(tmp_path):
+    """'연결 안 됨'과 '기기 무응답(전원/배터리)'을 앱에서 구분할 수 있어야 한다."""
+    logger = make_logger(tmp_path)
+    assert logger.link_state() == "no_port"          # 포트 자체가 없음
+
+    logger.ser = FakeSerial()
+    assert logger.link_state() == "no_data"          # 포트는 열렸는데 로그가 없음
+
+    logger.handle_line("[진행상태] 시간:1초 | 피부온도:30.0℃ | 세션:IDLE")
+    assert logger.link_state() == "online"
+
+    logger.last_line_at -= bridge.SILENT_LIMIT_SEC + 1
+    assert logger.link_state() == "no_data"          # 로그가 끊긴 지 오래됨
+    logger.close()
+
+
+def test_app_command_is_written_to_serial(tmp_path, monkeypatch):
+    posts = []
+    monkeypatch.setattr(bridge.ServerUploader, "_post",
+                        lambda self, path, payload: posts.append((path, payload)) or {})
+    monkeypatch.setattr(bridge.ServerUploader, "_get",
+                        lambda self, path: [{"command_id": 7, "command": "start"}])
+    uploader = bridge.ServerUploader("http://test", "key", "DORMX-1")
+    logger = make_logger(tmp_path, uploader=uploader)
+    logger.ser = FakeSerial()
+
+    for command in uploader.take_commands():
+        ok = logger.send_serial(command["command"])
+        uploader.ack_command(command["command_id"], ok, "시리얼 전송")
+    assert logger.ser.written == ["start\n"]
+
+    uploader.start()
+    uploader.close()
+    acks = [p for path, p in posts if "ack" in path]
+    assert acks and acks[0]["status"] == "done"
+    logger.close()
+
+
+def test_failed_command_is_reported_as_failed(tmp_path, monkeypatch):
+    posts = []
+    monkeypatch.setattr(bridge.ServerUploader, "_post",
+                        lambda self, path, payload: posts.append((path, payload)) or {})
+    uploader = bridge.ServerUploader("http://test", "key", "DORMX-1")
+    logger = make_logger(tmp_path, uploader=uploader)
+    logger.ser = FakeSerial(ok=False)          # 기기가 빠졌거나 꺼진 상태
+
+    ok = logger.send_serial("start")
+    uploader.ack_command(7, ok, "기기가 연결되어 있지 않음")
+    uploader.start()
+    uploader.close()
+    assert not ok
+    assert [p["status"] for path, p in posts if "ack" in path] == ["failed"]
+    logger.close()

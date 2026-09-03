@@ -1,5 +1,7 @@
 import type {
   AuthResult,
+  CommandOut,
+  DeviceStatus,
   Device,
   NoteCode,
   PendingDevice,
@@ -76,7 +78,7 @@ export const api = {
   registerDevice: (base: string, userToken: string, device_id: string, user_id: string, label: string) =>
     request<Device>(base, '/api/devices', { method: 'POST', userToken, body: { device_id, user_id, label } }),
   listDevices: (base: string, userToken: string, userId: string) =>
-    request<Device[]>(base, `/api/users/${userId}/devices`, { userToken }),
+    request<Device[]>(base, `/api/users/${encodeURIComponent(userId)}/devices`, { userToken }),
   /** 등록되지 않은 채 신호를 보내온 기기들 — 기기 ID 는 칩 MAC 이라 목록에서 고른다 */
   pendingDevices: (base: string, userToken: string, minutes = 180) =>
     request<PendingDevice[]>(base, `/api/devices/pending?minutes=${minutes}`, { userToken }),
@@ -85,11 +87,23 @@ export const api = {
 
   // --- 사용자 페이지 ---
   summary: (base: string, userToken: string, userId: string) =>
-    request<UserSummary>(base, `/api/users/${userId}/summary`, { userToken }),
+    request<UserSummary>(base, `/api/users/${encodeURIComponent(userId)}/summary`, { userToken }),
   sessions: (base: string, userToken: string, userId: string, limit = 30) =>
-    request<Session[]>(base, `/api/users/${userId}/sessions?limit=${limit}`, { userToken }),
+    request<Session[]>(base, `/api/users/${encodeURIComponent(userId)}/sessions?limit=${limit}`, { userToken }),
   sessionDetail: (base: string, userToken: string, sessionId: number) =>
     request<SessionDetail>(base, `/api/sessions/${sessionId}`, { userToken }),
+  /** 홈 화면 한 장을 그리는 데 필요한 상태 (연결·진행 세션·워밍업 완료) */
+  deviceStatus: (base: string, userToken: string, deviceId: string) =>
+    request<DeviceStatus>(base, `/api/devices/${deviceId}/status`, { userToken }),
+  /** 시작/중지 버튼 → 브리지를 거쳐 기기로 전달된다 */
+  sendCommand: (base: string, userToken: string, deviceId: string, command: 'start' | 'abort' | 'off') =>
+    request<CommandOut>(base, `/api/devices/${deviceId}/commands`, {
+      method: 'POST',
+      userToken,
+      body: { command },
+    }),
+  commandStatus: (base: string, userToken: string, deviceId: string, commandId: number) =>
+    request<CommandOut>(base, `/api/devices/${deviceId}/commands/${commandId}`, { userToken }),
   /** 아침 수면 평가(별점 + 특이사항) */
   reviewSession: (
     base: string,

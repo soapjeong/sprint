@@ -72,12 +72,18 @@ TEST_DATABASE_URL="postgresql://..." python -m pytest server/tests -q
 | GET | `/api/users/{id}/sessions` | 세션 목록 |
 | GET | `/api/sessions/{session_id}` | 세션 + 측정 샘플 + 이벤트 |
 | POST | `/api/sessions/{session_id}/review` | 아침 수면 평가(별점 1~5 + 특이사항) |
+| GET | `/api/devices/{device_id}/status` | 홈 화면용 상태(연결·진행 세션·워밍업 완료·목표 온도) |
+| POST | `/api/devices/{device_id}/commands` | 앱의 시작/중지 버튼 → 명령 큐 |
+| GET | `/api/devices/{device_id}/commands/{id}` | 그 명령이 기기까지 갔는지 확인 |
 
 **브리지 업로드** (`X-API-Key`)
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | POST | `/api/ingest/announce` | 기기 부팅(`@ID,...`) 통보 — 미등록이면 pending 목록에 올린다 |
+| GET | `/api/ingest/commands` | 브리지가 앱 명령을 가져간다(가져가면 `sent`) |
+| POST | `/api/ingest/commands/{id}/ack` | 시리얼 전송 결과 보고 |
+| POST | `/api/ingest/heartbeat` | 기기 연결 상태 보고(online / no_data / no_port) |
 | POST | `/api/ingest/events` | `@FLAG` / `@RESULT` 한 줄 → 세션 상태 갱신 |
 | POST | `/api/ingest/samples` | 1초 주기 측정값 배치 |
 
@@ -92,6 +98,8 @@ TEST_DATABASE_URL="postgresql://..." python -m pytest server/tests -q
 ## 관리자 대시보드
 
 `admin-web/` 의 정적 사이트를 서버가 `/admin/` 에 얹어 서비스한다(`https://<서버>/admin/`).
+사용자마다 탭이 하나씩 생기고, 각 탭에 그 사람의 세션이 표로 쌓인다 —
+입면 성공 여부 / 시작 누른 시간 / 입면 성공 시간 / 평점·특이사항 / 목표 온도·안정심박수.
 사용자 앱에는 관리자 화면이 없고, 앱에서 여기로 넘어가는 경로도 없다.
 토큰은 브라우저 탭 세션에만 보관된다(탭을 닫으면 지워짐).
 

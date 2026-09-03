@@ -152,6 +152,9 @@ def status_row_for_csv(line):
 # ---------------------------------------------------------------- 서버 업로드
 # 무료 호스팅은 유휴 상태에서 잠들었다가 첫 요청에 1분 가까이 걸리기도 한다.
 RETRY_DELAYS = (2, 5, 15, 30)
+COMMAND_POLL_SEC = 3.0      # 앱 버튼을 얼마나 빨리 기기에 전달할지
+HEARTBEAT_SEC = 15.0        # 기기 연결 상태 보고 주기
+SILENT_LIMIT_SEC = 20.0     # 포트는 열렸는데 이 시간 동안 로그가 없으면 "응답 없음"
 class ServerUploader:
     """서버 업로드 담당.
 
@@ -175,6 +178,13 @@ class ServerUploader:
         self.failures = 0
 
     # --- 내부 HTTP ---
+    def _get(self, path):
+        req = urllib.request.Request(
+            self.base_url + path, headers={"X-API-Key": self.api_key}, method="GET"
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
     def _post(self, path, payload):
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -249,6 +259,23 @@ class ServerUploader:
         if pending and self.device_id:
             self._queue.put(("samples", pending))
 
+    def take_commands(self):
+        """앱이 눌러 둔 명령을 가져온다(없으면 빈 목록)."""
+        if not self.device_id:
+            return []
+        try:
+            return self._get(f"/api/ingest/commands?device_id={self.device_id}")
+        except Exception:
+            return []                      # 서버가 잠깐 죽어도 로깅은 계속된다
+
+    def ack_command(self, command_id, ok, detail=""):
+        self._queue.put(("ack", {"command_id": command_id,
+                                 "status": "done" if ok else "failed", "detail": detail}))
+
+    def heartbeat(self, link_state):
+        if self.device_id:
+            self._queue.put(("heartbeat", {"device_id": self.device_id, "link_state": link_state}))
+
     # --- 전송 스레드 ---
     def _worker(self):
         while True:
@@ -281,6 +308,17 @@ class ServerUploader:
                     f"announce {payload['device_id']}",
                     retries=len(RETRY_DELAYS),
                 )
+            elif kind == "ack":
+                body = {"status": payload["status"], "detail": payload["detail"]}
+                self._post_safe(
+                    f"/api/ingest/commands/{payload['command_id']}/ack", body, "command ack", retries=1
+                )
+            elif kind == "heartbeat":
+                # 상태 보고는 실패해도 다음 주기에 다시 보내므로 재시도하지 않는다
+                try:
+                    self._post("/api/ingest/heartbeat", payload)
+                except Exception:
+                    pass
 
     def _flush_loop(self):
         while not self._stop.wait(self.flush_interval):
@@ -337,6 +375,7 @@ class SerialCsvLogger:
         self.replay = replay
         self.replay_delay = replay_delay
         self.device_id_fixed = device_id_fixed   # --device 로 직접 지정했으면 기기 통보를 무시
+        self.last_line_at = 0.0                  # 마지막으로 기기 로그를 받은 시각
         os.makedirs(self.outdir, exist_ok=True)
 
         tag = timestamp_tag()
@@ -383,6 +422,7 @@ class SerialCsvLogger:
         line = line.strip()
         if not line:
             return
+        self.last_line_at = time.time()
 
         if "[진행상태]" in line:
             if not self._header_written:
@@ -459,6 +499,46 @@ class SerialCsvLogger:
                     time.sleep(self.replay_delay)
         print("[재생 완료]")
 
+    def send_serial(self, text):
+        """기기에 시리얼 명령을 넣는다. 성공 여부를 돌려준다."""
+        if not (self.ser and self.ser.is_open):
+            return False
+        try:
+            self.ser.write((text + "\n").encode("utf-8"))
+            return True
+        except Exception as exc:
+            print(f"[명령 전송 실패] {text} {exc}")
+            return False
+
+    def link_state(self):
+        """앱에 보여줄 연결 상태 — 케이블 문제와 기기 전원 문제를 구분한다."""
+        if self.replay:
+            return "online"
+        if not (self.ser and self.ser.is_open):
+            return "no_port"
+        if self.last_line_at and (time.time() - self.last_line_at) <= SILENT_LIMIT_SEC:
+            return "online"
+        return "no_data"
+
+    def command_loop(self):
+        """앱에서 누른 시작/중지 버튼을 받아 기기에 넣고, 상태를 주기적으로 보고한다."""
+        last_beat = 0.0
+        while not self._stop.wait(COMMAND_POLL_SEC):
+            if not self.uploader:
+                continue
+            for command in self.uploader.take_commands():
+                name = command.get("command", "")
+                print(f"[앱 명령] {name}")
+                ok = self.send_serial(name)
+                self.uploader.ack_command(
+                    command.get("command_id"), ok,
+                    "시리얼 전송" if ok else "기기가 연결되어 있지 않음",
+                )
+            now = time.time()
+            if now - last_beat >= HEARTBEAT_SEC:
+                last_beat = now
+                self.uploader.heartbeat(self.link_state())
+
     def writer_loop(self):
         while not self._stop.is_set():
             try:
@@ -480,6 +560,7 @@ class SerialCsvLogger:
             return
         self.connect()
         threading.Thread(target=self.reader_loop, daemon=True).start()
+        threading.Thread(target=self.command_loop, daemon=True).start()
         try:
             self.writer_loop()
         except KeyboardInterrupt:

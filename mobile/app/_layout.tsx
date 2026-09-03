@@ -2,25 +2,21 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SettingsProvider } from '@/store/settings';
-import { useTheme } from '@/theme';
+import { theme } from '@/theme';
 
 export default function RootLayout() {
-  const t = useTheme();
   return (
     <SafeAreaProvider>
       <SettingsProvider>
-        <StatusBar style="auto" />
+        <StatusBar style="light" />
+        {/* 화면마다 자체 헤더를 그리므로(목업 구조) 네비게이션 헤더는 숨긴다 */}
         <Stack
           screenOptions={{
-            headerStyle: { backgroundColor: t.surface },
-            headerTintColor: t.textPrimary,
-            headerTitleStyle: { fontWeight: '700' },
-            contentStyle: { backgroundColor: t.bg },
-          }}>
-          <Stack.Screen name="index" options={{ title: '시작하기' }} />
-          <Stack.Screen name="user/home" options={{ title: '내 수면 리포트' }} />
-          <Stack.Screen name="user/session/[id]" options={{ title: '세션 상세' }} />
-        </Stack>
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+            animation: 'fade',
+          }}
+        />
       </SettingsProvider>
     </SafeAreaProvider>
   );

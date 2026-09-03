@@ -24,10 +24,15 @@ from .models import (
     AdminUserRow,
     AnnounceResult,
     AuthResult,
+    CommandAck,
+    CommandOut,
+    CommandRequest,
     DeviceAnnounce,
+    DeviceStatus,
     DeviceOut,
     DeviceRegister,
     EventIn,
+    HeartbeatIn,
     IngestResult,
     LoginRequest,
     PendingDevice,
@@ -279,6 +284,114 @@ def unregister_device(device_id: str, caller: str = Depends(current_user)) -> No
         conn.execute("DELETE FROM devices WHERE device_id=?", (device_id,))
 
 
+@app.post("/api/devices/{device_id}/commands", response_model=CommandOut,
+          status_code=status.HTTP_201_CREATED)
+def queue_command(
+    device_id: str, payload: CommandRequest, caller: str = Depends(current_user)
+) -> CommandOut:
+    """앱의 버튼을 기기까지 전달한다. 브리지가 가져가 시리얼로 넣는다."""
+    with db.session_scope() as conn:
+        device = _get_device(conn, device_id)
+        _require_self(caller, str(device["user_id"]))
+        now = db.now_iso()
+        command_id = db.insert_returning_id(
+            conn,
+            "INSERT INTO device_commands(device_id, command, requested_by, created_at)"
+            " VALUES(?,?,?,?)",
+            (device_id, payload.command, caller, now),
+            "command_id",
+        )
+        row = conn.execute(
+            "SELECT * FROM device_commands WHERE command_id=?", (command_id,)
+        ).fetchone()
+        return CommandOut(**_row_to_dict(row))
+
+
+ONLINE_WINDOW_S = 45     # 이 시간 안에 하트비트가 있었으면 '연결됨'으로 본다
+
+
+@app.get("/api/devices/{device_id}/status", response_model=DeviceStatus)
+def device_status(device_id: str, caller: str = Depends(current_user)) -> DeviceStatus:
+    """홈 화면 한 장을 그리는 데 필요한 것만 모아서 준다."""
+    with db.session_scope() as conn:
+        device = _get_device(conn, device_id)
+        _require_self(caller, str(device["user_id"]))
+
+        online = False
+        if device["link_state"] == "online" and device["link_seen_at"]:
+            try:
+                seen = datetime.fromisoformat(str(device["link_seen_at"]))
+                online = (datetime.now(timezone.utc) - seen).total_seconds() <= ONLINE_WINDOW_S
+            except ValueError:
+                online = False
+
+        session = _open_session(conn, device_id)
+        session_out = SessionOut(**_row_to_dict(session)) if session else None
+
+        state = safety = None
+        skin = duty = None
+        warmup_done = False
+        if session is not None:
+            sample = conn.execute(
+                "SELECT * FROM samples WHERE session_id=? ORDER BY sample_id DESC LIMIT 1",
+                (session["session_id"],),
+            ).fetchone()
+            if sample is not None:
+                state = sample["session_state"]
+                safety = sample["safety_state"]
+                skin = _num(sample["skin_c"])
+                duty = _num(sample["duty_pct"])
+            warmup_done = conn.execute(
+                "SELECT 1 FROM events WHERE session_id=? AND flag='WARMUP_DONE' LIMIT 1",
+                (session["session_id"],),
+            ).fetchone() is not None
+
+        target = _num(session["target_temp_c"]) if session else None
+        if target is None:
+            last = conn.execute(
+                "SELECT target_temp_c FROM sessions WHERE device_id=? AND target_temp_c IS NOT NULL"
+                " ORDER BY session_id DESC LIMIT 1",
+                (device_id,),
+            ).fetchone()
+            target = _num(last["target_temp_c"]) if last else None
+
+        pending = conn.execute(
+            "SELECT command FROM device_commands WHERE device_id=? AND status IN ('pending','sent')"
+            " ORDER BY command_id DESC LIMIT 1",
+            (device_id,),
+        ).fetchone()
+
+        return DeviceStatus(
+            device=DeviceOut(**_row_to_dict(device)),
+            online=online,
+            session=session_out,
+            session_state=state,
+            safety_state=safety,
+            skin_c=skin,
+            duty_pct=duty,
+            warmup_done=warmup_done,
+            target_temp_c=target,
+            pending_command=pending["command"] if pending else None,
+        )
+
+
+@app.get("/api/devices/{device_id}/commands/{command_id}", response_model=CommandOut)
+def command_status(
+    device_id: str, command_id: int, caller: str = Depends(current_user)
+) -> CommandOut:
+    """앱이 '기기에 전달됐는지' 확인할 때 쓴다."""
+    with db.session_scope() as conn:
+        device = _get_device(conn, device_id)
+        _require_self(caller, str(device["user_id"]))
+        row = conn.execute(
+            "SELECT * FROM device_commands WHERE command_id=? AND device_id=?",
+            (command_id, device_id),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "명령을 찾을 수 없습니다.")
+        return CommandOut(**_row_to_dict(row))
+
+
 # ---------------------------------------------------------------- 사용자 페이지 조회
 def _session_rows(conn: Any, user_id: str, limit: int) -> list[SessionOut]:
     rows = conn.execute(
@@ -432,6 +545,72 @@ def ingest_announce(payload: DeviceAnnounce) -> AnnounceResult:
         )
 
 
+@app.get("/api/ingest/commands", response_model=list[CommandOut],
+         dependencies=[Depends(require_ingest_key)])
+def take_commands(device_id: str = Query(...)) -> list[CommandOut]:
+    """브리지가 폴링해서 가져간다. 가져간 명령은 sent 로 표시한다."""
+    with db.session_scope() as conn:
+        rows = conn.execute(
+            "SELECT * FROM device_commands WHERE device_id=? AND status='pending'"
+            " ORDER BY command_id LIMIT 5",
+            (device_id,),
+        ).fetchall()
+        now = db.now_iso()
+        out = []
+        for row in rows:
+            conn.execute(
+                "UPDATE device_commands SET status='sent', sent_at=? WHERE command_id=?",
+                (now, row["command_id"]),
+            )
+            data = _row_to_dict(row)
+            data.update(status="sent", sent_at=now)
+            out.append(CommandOut(**data))
+        return out
+
+
+@app.post("/api/ingest/commands/{command_id}/ack", response_model=CommandOut,
+          dependencies=[Depends(require_ingest_key)])
+def ack_command(command_id: int, payload: CommandAck) -> CommandOut:
+    with db.session_scope() as conn:
+        row = conn.execute(
+            "SELECT * FROM device_commands WHERE command_id=?", (command_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "명령을 찾을 수 없습니다.")
+        conn.execute(
+            "UPDATE device_commands SET status=?, acked_at=?, detail=? WHERE command_id=?",
+            (payload.status, db.now_iso(), payload.detail, command_id),
+        )
+        updated = conn.execute(
+            "SELECT * FROM device_commands WHERE command_id=?", (command_id,)
+        ).fetchone()
+        return CommandOut(**_row_to_dict(updated))
+
+
+@app.post("/api/ingest/heartbeat", response_model=DeviceOut,
+          dependencies=[Depends(require_ingest_key)])
+def heartbeat(payload: HeartbeatIn) -> DeviceOut:
+    """브리지가 보는 기기 상태를 갱신한다.
+
+    online  : 시리얼 포트가 열려 있고 최근에 로그가 들어왔다
+    no_data : 포트는 열렸는데 로그가 끊겼다(기기 전원/배터리 확인)
+    no_port : 포트 자체가 없다(케이블/기기 연결 확인)
+    """
+    with db.session_scope() as conn:
+        _get_device(conn, payload.device_id)
+        now = db.now_iso()
+        conn.execute(
+            "UPDATE devices SET link_state=?, link_seen_at=?, battery_pct=?,"
+            " last_seen_at=CASE WHEN ?='online' THEN ? ELSE last_seen_at END"
+            " WHERE device_id=?",
+            (payload.link_state, now, payload.battery_pct, payload.link_state, now, payload.device_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM devices WHERE device_id=?", (payload.device_id,)
+        ).fetchone()
+        return DeviceOut(**_row_to_dict(row))
+
+
 @app.post("/api/ingest/events", response_model=IngestResult, dependencies=[Depends(require_ingest_key)])
 def ingest_event(payload: EventIn) -> IngestResult:
     """펌웨어의 @FLAG / @RESULT 한 줄을 받아 세션 상태를 갱신한다."""
@@ -472,8 +651,13 @@ def ingest_event(payload: EventIn) -> IngestResult:
                     detail = "안정심박수 기록"
                 elif flag in TERMINAL_FLAGS:
                     conn.execute(
-                        "UPDATE sessions SET sol_min=?, outcome=? WHERE session_id=?",
-                        (_value(payload.values, 0), TERMINAL_FLAGS[flag], session_id),
+                        "UPDATE sessions SET sol_min=?, outcome=?, onset_at=? WHERE session_id=?",
+                        (
+                            _value(payload.values, 0),
+                            TERMINAL_FLAGS[flag],
+                            now if flag == "SLEEP_ONSET" else None,
+                            session_id,
+                        ),
                     )
                     detail = "입면 결과 기록"
                 elif flag in CLOSING_FLAGS:

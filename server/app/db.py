@@ -115,6 +115,21 @@ CREATE TABLE IF NOT EXISTS pending_devices (
     last_seen_at  TEXT NOT NULL,
     firmware      TEXT NOT NULL DEFAULT ''
 );
+
+-- 앱에서 누른 버튼을 기기까지 전달하는 명령 큐 (앱 -> 서버 -> 브리지 -> 시리얼)
+CREATE TABLE IF NOT EXISTS device_commands (
+    command_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id    TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+    command      TEXT NOT NULL,                    -- start | abort | off
+    requested_by TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',  -- pending | sent | done | failed
+    sent_at      TEXT,
+    acked_at     TEXT,
+    detail       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_commands_device ON device_commands(device_id, status, command_id);
+
 """
 
 # 같은 구조의 PostgreSQL 판 (배포용)
@@ -212,6 +227,21 @@ CREATE TABLE IF NOT EXISTS pending_devices (
 );
 
 
+
+-- 앱에서 누른 버튼을 기기까지 전달하는 명령 큐 (앱 -> 서버 -> 브리지 -> 시리얼)
+CREATE TABLE IF NOT EXISTS device_commands (
+    command_id   BIGSERIAL PRIMARY KEY,
+    device_id    TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+    command      TEXT NOT NULL,                    -- start | abort | off
+    requested_by TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',  -- pending | sent | done | failed
+    sent_at      TEXT,
+    acked_at     TEXT,
+    detail       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_commands_device ON device_commands(device_id, status, command_id);
+
 """
 
 # 나중에 추가된 컬럼(구버전 DB 호환). 두 엔진 모두에서 통하는 타입만 쓴다.
@@ -220,7 +250,14 @@ MIGRATIONS: dict[str, dict[str, str]] = {
         "password_salt": "TEXT NOT NULL DEFAULT ''",
         "password_hash": "TEXT NOT NULL DEFAULT ''",
     },
+    "devices": {
+        # 브리지가 알려주는 연결 상태: online | no_data | no_port | unknown
+        "link_state": "TEXT NOT NULL DEFAULT 'unknown'",
+        "link_seen_at": "TEXT",
+        "battery_pct": "REAL",
+    },
     "sessions": {
+        "onset_at": "TEXT",
         "rating": "INTEGER",
         "note_code": "TEXT",
         "note_text": "TEXT",

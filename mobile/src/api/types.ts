@@ -9,6 +9,9 @@ export type Device = {
   label: string;
   registered_at: string;
   last_seen_at: string | null;
+  link_state: LinkState;
+  link_seen_at: string | null;
+  battery_pct: number | null;
 };
 
 export type SessionOutcome = 'running' | 'onset' | 'no_onset' | 'aborted' | 'fault';
@@ -22,6 +25,32 @@ export const NOTE_OPTIONS: { code: NoteCode; label: string }[] = [
   { code: 'none', label: '없음' },
   { code: 'other', label: '기타' },
 ];
+
+export type LinkState = 'online' | 'no_data' | 'no_port' | 'unknown';
+
+export type CommandOut = {
+  command_id: number;
+  device_id: string;
+  command: string;
+  status: 'pending' | 'sent' | 'done' | 'failed';
+  created_at: string;
+  sent_at: string | null;
+  acked_at: string | null;
+  detail: string;
+};
+
+export type DeviceStatus = {
+  device: Device;
+  online: boolean;
+  session: Session | null;
+  session_state: string | null;
+  safety_state: string | null;
+  skin_c: number | null;
+  duty_pct: number | null;
+  warmup_done: boolean;
+  target_temp_c: number | null;
+  pending_command: string | null;
+};
 
 export type PendingDevice = {
   device_id: string;
@@ -40,6 +69,7 @@ export type Session = {
   resting_bpm: number | null;
   threshold_bpm: number | null;
   sol_min: number | null;
+  onset_at: string | null;
   outcome: SessionOutcome;
   rating: number | null;
   note_code: NoteCode | null;

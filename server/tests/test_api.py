@@ -103,6 +103,16 @@ def test_device_reregistration_updates_owner(client):
     assert client.get("/api/users/sub01/devices", headers=auth(client)).json() == []
 
 
+def test_korean_nickname_is_allowed(client):
+    """닉네임은 사람이 정하는 값이라 한글을 받아야 한다."""
+    r = client.post("/api/users", json={"user_id": "민서", "name": "민서", "password": PASSWORD})
+    assert r.status_code == 201
+    headers = {"X-User-Token": r.json()["access_token"]}
+    assert client.get("/api/users/민서/summary", headers=headers).status_code == 200
+    again = client.post("/api/auth/login", json={"user_id": "민서", "password": PASSWORD})
+    assert again.status_code == 200
+
+
 def test_invalid_user_id_rejected(client):
     assert client.post(
         "/api/users", json={"user_id": "a b/c", "name": "", "password": PASSWORD}
@@ -258,6 +268,100 @@ def test_pending_list_hides_old_sightings(client):
 
     assert client.get("/api/devices/pending?minutes=60", headers=auth(client)).json() == []
     assert [p["device_id"] for p in client.get("/api/devices/pending?minutes=600", headers=auth(client)).json()] == ["DORMX-OLD"]
+
+
+# ---------------------------------------------------------------- 앱 -> 기기 명령
+def test_start_command_reaches_the_bridge(client):
+    """앱의 시작 버튼 -> 서버 큐 -> 브리지가 가져감 -> 결과 보고."""
+    _, device_id = register(client)
+    queued = client.post(
+        f"/api/devices/{device_id}/commands", headers=auth(client), json={"command": "start"}
+    )
+    assert queued.status_code == 201
+    cid = queued.json()["command_id"]
+    assert queued.json()["status"] == "pending"
+
+    taken = client.get(f"/api/ingest/commands?device_id={device_id}", headers=INGEST)
+    assert [c["command"] for c in taken.json()] == ["start"]
+    assert taken.json()[0]["status"] == "sent"
+    # 같은 명령을 두 번 가져가지 않는다
+    assert client.get(f"/api/ingest/commands?device_id={device_id}", headers=INGEST).json() == []
+
+    client.post(f"/api/ingest/commands/{cid}/ack", headers=INGEST, json={"status": "done", "detail": "시리얼 전송"})
+    seen = client.get(f"/api/devices/{device_id}/commands/{cid}", headers=auth(client))
+    assert seen.json()["status"] == "done"
+
+
+def test_command_is_owner_only(client):
+    _, device_id = register(client)
+    signup(client, "sub02", "둘째")
+    r = client.post(
+        f"/api/devices/{device_id}/commands", headers=auth(client, "sub02"), json={"command": "start"}
+    )
+    assert r.status_code == 403
+    assert client.post(f"/api/devices/{device_id}/commands", json={"command": "start"}).status_code == 401
+    assert client.post(
+        f"/api/devices/{device_id}/commands", headers=auth(client), json={"command": "폭파"}
+    ).status_code == 422
+
+
+def test_heartbeat_reports_link_state(client):
+    """앱이 '연결 안 됨'과 '전원/배터리 문제'를 구분해 보여줄 수 있어야 한다."""
+    _, device_id = register(client)
+    assert client.get("/api/users/sub01/devices", headers=auth(client)).json()[0]["link_state"] == "unknown"
+
+    for state in ("no_port", "no_data", "online"):
+        r = client.post("/api/ingest/heartbeat", headers=INGEST, json={"device_id": device_id, "link_state": state})
+        assert r.status_code == 200 and r.json()["link_state"] == state
+    device = client.get("/api/users/sub01/devices", headers=auth(client)).json()[0]
+    assert device["link_state"] == "online" and device["link_seen_at"]
+    assert client.post(
+        "/api/ingest/heartbeat", headers=INGEST, json={"device_id": device_id, "link_state": "정상"}
+    ).status_code == 422
+
+
+def test_onset_time_is_recorded(client):
+    """관리자 화면에 '입면 성공 시각'을 그대로 보여주기 위해 기록한다."""
+    _, device_id = register(client)
+    flag(client, device_id, "SESSION_START", [38.5])
+    flag(client, device_id, "SLEEP_ONSET", [18.5])
+    session = client.get("/api/users/sub01/sessions", headers=auth(client)).json()[0]
+    assert session["onset_at"] is not None
+    assert session["started_at"] <= session["onset_at"]
+
+    flag(client, device_id, "SESSION_START", [38.5])
+    flag(client, device_id, "NO_ONSET", [60.0])
+    timeout_session = client.get("/api/users/sub01/sessions", headers=auth(client)).json()[0]
+    assert timeout_session["onset_at"] is None
+
+
+def test_device_status_drives_the_home_screen(client):
+    """홈 화면이 필요한 값(연결, 진행 세션, 워밍업 완료, 목표 온도)을 한 번에 준다."""
+    _, device_id = register(client)
+    idle = client.get(f"/api/devices/{device_id}/status", headers=auth(client)).json()
+    assert idle["online"] is False and idle["session"] is None and idle["warmup_done"] is False
+
+    client.post("/api/ingest/heartbeat", headers=INGEST, json={"device_id": device_id, "link_state": "online"})
+    flag(client, device_id, "SESSION_START", [38.4], ms=1000)
+    running = client.get(f"/api/devices/{device_id}/status", headers=auth(client)).json()
+    assert running["online"] is True
+    assert running["session"]["outcome"] == "running"
+    assert running["target_temp_c"] == 38.4
+    assert running["warmup_done"] is False           # 아직 워밍업 중 -> TTS 시점 아님
+
+    flag(client, device_id, "WARMUP_DONE", [38.4], ms=21000)
+    client.post("/api/ingest/samples", headers=INGEST, json={"device_id": device_id, "samples": [
+        {"device_ms": 22000, "skin_c": 33.2, "duty_pct": 80.0, "session_state": "RUNNING",
+         "safety_state": "NORMAL"}]})
+    warmed = client.get(f"/api/devices/{device_id}/status", headers=auth(client)).json()
+    assert warmed["warmup_done"] is True             # 여기서 앱이 TTS 를 재생한다
+    assert warmed["session_state"] == "RUNNING" and warmed["skin_c"] == 33.2
+
+
+def test_device_status_is_owner_only(client):
+    _, device_id = register(client)
+    signup(client, "sub02", "둘째")
+    assert client.get(f"/api/devices/{device_id}/status", headers=auth(client, "sub02")).status_code == 403
 
 
 # ---------------------------------------------------------------- 아침 수면 평가

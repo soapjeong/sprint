@@ -5,20 +5,23 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# 기기 ID 는 칩 MAC 에서 만들어지므로 영숫자만 쓴다
 ID_PATTERN = r"^[A-Za-z0-9_.-]{2,32}$"
+# 닉네임은 사람이 정하므로 한글도 받는다
+NICKNAME_PATTERN = r"^[A-Za-z0-9가-힣ㄱ-ㅎㅏ-ㅣ_.-]{2,16}$"
 
 
 MIN_PASSWORD_LEN = 8
 
 
 class UserCreate(BaseModel):
-    user_id: str = Field(pattern=ID_PATTERN, description="사용자 ID (영문/숫자/._-, 2~32자)")
+    user_id: str = Field(pattern=NICKNAME_PATTERN, description="닉네임 (한글/영문/숫자, 2~16자)")
     name: str = Field(default="", max_length=64)
     password: str = Field(min_length=MIN_PASSWORD_LEN, max_length=128)
 
 
 class LoginRequest(BaseModel):
-    user_id: str = Field(pattern=ID_PATTERN)
+    user_id: str = Field(pattern=NICKNAME_PATTERN)
     password: str = Field(min_length=1, max_length=128)
 
 
@@ -30,8 +33,8 @@ class AuthResult(BaseModel):
 
 
 class DeviceRegister(BaseModel):
-    device_id: str = Field(pattern=ID_PATTERN, description="기기 고유번호 (기기 뒷면 라벨)")
-    user_id: str = Field(pattern=ID_PATTERN)
+    device_id: str = Field(pattern=ID_PATTERN, description="기기 고유번호(칩 MAC 기반)")
+    user_id: str = Field(pattern=NICKNAME_PATTERN)
     label: str = Field(default="", max_length=64, description="사용자가 붙이는 기기 별칭")
 
 
@@ -47,6 +50,10 @@ class DeviceOut(BaseModel):
     label: str
     registered_at: str
     last_seen_at: Optional[str] = None
+    # 브리지가 알려주는 연결 상태: online | no_data | no_port | unknown
+    link_state: str = "unknown"
+    link_seen_at: Optional[str] = None
+    battery_pct: Optional[float] = None
 
 
 NOTE_CODES = ("alcohol", "caffeine", "none", "other")
@@ -62,6 +69,7 @@ class SessionOut(BaseModel):
     resting_bpm: Optional[float] = None
     threshold_bpm: Optional[float] = None
     sol_min: Optional[float] = None
+    onset_at: Optional[str] = None
     outcome: str
     rating: Optional[int] = None
     note_code: Optional[str] = None
@@ -128,6 +136,74 @@ class UserSummary(BaseModel):
     # 아직 별점을 남기지 않은 가장 최근 세션(있으면 홈 화면에 평가 카드를 띄운다)
     pending_review: Optional[SessionOut] = None
     avg_rating: Optional[float] = None
+
+
+LINK_STATES = ("online", "no_data", "no_port", "unknown")
+COMMANDS = ("start", "abort", "off")
+
+
+class CommandRequest(BaseModel):
+    command: str = Field(description="start | abort | off")
+
+    @field_validator("command")
+    @classmethod
+    def _known(cls, v: str) -> str:
+        if v not in COMMANDS:
+            raise ValueError(f"command 는 {COMMANDS} 중 하나여야 합니다.")
+        return v
+
+
+class CommandOut(BaseModel):
+    command_id: int
+    device_id: str
+    command: str
+    status: str
+    created_at: str
+    sent_at: Optional[str] = None
+    acked_at: Optional[str] = None
+    detail: str = ""
+
+
+class CommandAck(BaseModel):
+    status: str = Field(description="done | failed")
+    detail: str = Field(default="", max_length=200)
+
+    @field_validator("status")
+    @classmethod
+    def _ack(cls, v: str) -> str:
+        if v not in ("done", "failed"):
+            raise ValueError("status 는 done 또는 failed 여야 합니다.")
+        return v
+
+
+class HeartbeatIn(BaseModel):
+    """브리지가 주기적으로 보내는 기기 연결 상태."""
+
+    device_id: str = Field(pattern=ID_PATTERN)
+    link_state: str = Field(default="unknown")
+    battery_pct: Optional[float] = Field(default=None, ge=0, le=100)
+
+    @field_validator("link_state")
+    @classmethod
+    def _state(cls, v: str) -> str:
+        if v not in LINK_STATES:
+            raise ValueError(f"link_state 는 {LINK_STATES} 중 하나여야 합니다.")
+        return v
+
+
+class DeviceStatus(BaseModel):
+    """홈 화면이 5초마다 물어보는 '지금 기기가 어떤 상태인가'."""
+
+    device: DeviceOut
+    online: bool                      # link_seen_at 이 최근인지까지 반영한 값
+    session: Optional["SessionOut"] = None      # 진행 중인 세션(없으면 None)
+    session_state: Optional[str] = None         # WARMUP | RUNNING | COOLDOWN ...
+    safety_state: Optional[str] = None
+    skin_c: Optional[float] = None
+    duty_pct: Optional[float] = None
+    warmup_done: bool = False         # 센서 워밍업이 끝나 가온이 시작됐는가(TTS 시점)
+    target_temp_c: Optional[float] = None
+    pending_command: Optional[str] = None
 
 
 class EventIn(BaseModel):
