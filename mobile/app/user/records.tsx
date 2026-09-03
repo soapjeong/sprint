@@ -6,7 +6,7 @@ import { NOTE_OPTIONS, type Session } from '@/api/types';
 import { useSettings } from '@/store/settings';
 import { radius, spacing, theme } from '@/theme';
 import { Body, Caption, Card, ErrorNote, Heading, Loading, Row, Screen, Title } from '@/ui/kit';
-import { formatClock, formatMinutes, formatTemp } from '@/util/format';
+import { formatMinutes } from '@/util/format';
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -168,23 +168,6 @@ export default function RecordsScreen() {
           </Card>
         ) : null}
 
-        {/* 이 달 요약 */}
-        {sessions ? (
-          <Card>
-            <Heading>{`${month + 1}월 요약`}</Heading>
-            <Body muted>
-              {monthSessions.length
-                ? `기기 사용 ${monthSessions.length}회 · 입면 성공 ${monthOnsets.length}회` +
-                  (monthOnsets.length
-                    ? ` · 평균 ${(
-                        monthOnsets.reduce((a, s) => a + (s.sol_min ?? 0), 0) / monthOnsets.length
-                      ).toFixed(0)}분`
-                    : '')
-                : '이 달에는 기록이 없어요.'}
-            </Body>
-          </Card>
-        ) : null}
-
         {/* 고른 날의 기록 */}
         {picked ? (
           <Card>
@@ -194,32 +177,49 @@ export default function RecordsScreen() {
               const note = NOTE_OPTIONS.find((o) => o.code === s.note_code);
               const ok = s.outcome === 'onset';
               return (
-                <Pressable
+                <View
                   key={s.session_id}
-                  onPress={() => router.push(`/user/session/${s.session_id}`)}
-                  style={({ pressed }) => ({
+                  style={{
                     backgroundColor: theme.surfaceAlt,
                     borderRadius: radius.tile,
                     padding: spacing.lg,
-                    gap: 4,
-                    opacity: pressed ? 0.8 : 1,
-                  })}>
-                  <Row style={{ alignItems: 'flex-end', gap: 6 }}>
-                    <Text style={{ color: theme.textPrimary, fontSize: 22, fontWeight: '800' }}>
-                      {ok ? `${formatMinutes(s.sol_min)}분` : '못 잠듦'}
+                    gap: 6,
+                  }}>
+                  {/* 1) 입면 성공 여부 */}
+                  <Row style={{ alignItems: 'center', gap: 8 }}>
+                    <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: ok ? theme.mint : theme.amber }} />
+                    <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '700' }}>
+                      {ok ? '입면 성공' : '입면 실패'}
                     </Text>
-                    {ok ? (
-                      <Text style={{ color: theme.textSecondary, fontSize: 14, paddingBottom: 3 }}>
-                        {`· ${formatClock(s.onset_at)}에 잠듦`}
-                      </Text>
-                    ) : null}
                   </Row>
-                  <Caption>
-                    {`목표 ${formatTemp(s.target_temp_c)}℃`}
-                    {s.rating ? ` · ${'★'.repeat(s.rating)}${'☆'.repeat(5 - s.rating)}` : ''}
-                    {note ? ` · ${note.label}` : ''}
-                  </Caption>
-                </Pressable>
+
+                  {/* 2) 성공했다면 입면시간 */}
+                  {ok ? (
+                    <Row style={{ alignItems: 'flex-end', gap: 6 }}>
+                      <Text style={{ color: theme.textPrimary, fontSize: 26, fontWeight: '800' }}>
+                        {`${formatMinutes(s.sol_min)}분`}
+                      </Text>
+                      <Text style={{ color: theme.textSecondary, fontSize: 14, paddingBottom: 4 }}>
+                        만에 잠들었어요
+                      </Text>
+                    </Row>
+                  ) : null}
+
+                  {/* 3) 수면 평가 */}
+                  {s.rating ? (
+                    <View style={{ gap: 2 }}>
+                      <Text style={{ color: theme.moon, fontSize: 16, letterSpacing: 1 }}>
+                        {`${'★'.repeat(s.rating)}${'☆'.repeat(5 - s.rating)}`}
+                      </Text>
+                      <Caption>
+                        {note ? note.label : '특이사항 없음'}
+                        {s.note_code === 'other' && s.note_text ? ` · ${s.note_text}` : ''}
+                      </Caption>
+                    </View>
+                  ) : (
+                    <Caption>수면 평가를 남기지 않았어요</Caption>
+                  )}
+                </View>
               );
             })}
           </Card>

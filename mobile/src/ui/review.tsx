@@ -90,8 +90,8 @@ export function SleepReviewPopup({
               </Text>
             </View>
 
-            {rating > 0 ? (
-              <View style={{ gap: spacing.sm }}>
+            {/* 특이사항은 처음부터 보이게 둔다(별점만 매기고 못 찾는 일이 없도록) */}
+            <View style={{ gap: spacing.sm }}>
                 <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: '700' }}>
                   특이사항을 골라주세요
                 </Text>
@@ -150,9 +150,8 @@ export function SleepReviewPopup({
                       fontSize: 15,
                     }}
                   />
-                ) : null}
-              </View>
-            ) : null}
+              ) : null}
+            </View>
 
             {error ? <Caption color={theme.coral}>{error}</Caption> : null}
           </ScrollView>

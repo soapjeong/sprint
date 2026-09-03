@@ -283,8 +283,7 @@ export default function HomeScreen() {
 
         {/* 수면 입면 분석 — 카드 전체를 누르면 상세로 넘어간다 */}
         <Pressable
-          onPress={() => last && router.push(`/user/session/${last.session_id}`)}
-          disabled={!last}
+          onPress={() => router.push('/user/analysis')}
           accessibilityRole="button"
           accessibilityLabel="수면 입면 분석 자세히 보기"
           style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
@@ -292,9 +291,7 @@ export default function HomeScreen() {
             <Row style={{ alignItems: 'center' }}>
               <Heading>수면 입면 분석</Heading>
               <View style={{ flex: 1 }} />
-              <Text style={{ color: theme.moon, fontSize: 20, fontWeight: '700', opacity: last ? 1 : 0.3 }}>
-                ›
-              </Text>
+              <Text style={{ color: theme.moon, fontSize: 20, fontWeight: '700' }}>›</Text>
             </Row>
             <Row>
               <Tile label="입면시간" style={{ minHeight: 92 }}>
