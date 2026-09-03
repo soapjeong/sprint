@@ -92,7 +92,7 @@ export const api = {
     request<Session[]>(base, `/api/users/${encodeURIComponent(userId)}/sessions?limit=${limit}`, { userToken }),
   sessionDetail: (base: string, userToken: string, sessionId: number) =>
     request<SessionDetail>(base, `/api/sessions/${sessionId}`, { userToken }),
-  /** 홈 화면 한 장을 그리는 데 필요한 상태 (연결·진행 세션·워밍업 완료) */
+  /** 홈 화면 한 장을 그리는 데 필요한 상태 (연결·진행 중인 기기 사용·워밍업 완료) */
   deviceStatus: (base: string, userToken: string, deviceId: string) =>
     request<DeviceStatus>(base, `/api/devices/${deviceId}/status`, { userToken }),
   /** 시작/중지 버튼 → 브리지를 거쳐 기기로 전달된다 */

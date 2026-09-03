@@ -258,6 +258,8 @@ MIGRATIONS: dict[str, dict[str, str]] = {
     },
     "sessions": {
         "onset_at": "TEXT",
+        # 미입면 원인: hr_high | motion | sensor | unknown
+        "failure_reason": "TEXT",
         "rating": "INTEGER",
         "note_code": "TEXT",
         "note_text": "TEXT",

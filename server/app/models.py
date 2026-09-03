@@ -11,7 +11,7 @@ ID_PATTERN = r"^[A-Za-z0-9_.-]{2,32}$"
 NICKNAME_PATTERN = r"^[A-Za-z0-9가-힣ㄱ-ㅎㅏ-ㅣ_.-]{2,16}$"
 
 
-MIN_PASSWORD_LEN = 8
+MIN_PASSWORD_LEN = 4
 
 
 class UserCreate(BaseModel):
@@ -70,6 +70,7 @@ class SessionOut(BaseModel):
     threshold_bpm: Optional[float] = None
     sol_min: Optional[float] = None
     onset_at: Optional[str] = None
+    failure_reason: Optional[str] = None
     outcome: str
     rating: Optional[int] = None
     note_code: Optional[str] = None

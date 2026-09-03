@@ -29,7 +29,7 @@ function StarRow({ value, onChange }: { value: number; onChange: (v: number) => 
 }
 
 /**
- * 어젯밤 수면 평가 — 입면이 확정된 세션에만 뜨는 팝업 카드.
+ * 어젯밤 수면 평가 — 입면이 확정됐을 때만 화면 가운데 뜨는 팝업 카드.
  * 별점을 먼저 매기고, 그다음 특이사항을 골라야 저장할 수 있다.
  */
 export function SleepReviewPopup({
@@ -37,7 +37,6 @@ export function SleepReviewPopup({
   dateLabel,
   solMin,
   onSubmit,
-  onSkip,
   submitting,
   error,
 }: {
@@ -45,7 +44,6 @@ export function SleepReviewPopup({
   dateLabel: string;
   solMin: number | null;
   onSubmit: (rating: number, note: NoteCode, text: string) => void;
-  onSkip: () => void;
   submitting?: boolean;
   error?: string;
 }) {
@@ -57,30 +55,27 @@ export function SleepReviewPopup({
   const canSubmit = rating > 0 && note !== null && (!needsText || text.trim().length > 0);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onSkip}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => undefined}>
+      {/* 화면 한가운데 뜨는 카드 — 평가를 남겨야 닫힌다 */}
       <View
         style={{
           flex: 1,
-          backgroundColor: 'rgba(4,7,26,0.72)',
-          justifyContent: 'flex-end',
+          backgroundColor: 'rgba(4,7,26,0.78)',
+          justifyContent: 'center',
+          padding: spacing.lg,
         }}>
         <View
           style={[
             {
               backgroundColor: theme.surface,
-              borderTopLeftRadius: radius.sheet,
-              borderTopRightRadius: radius.sheet,
+              borderRadius: radius.sheet,
               padding: spacing.xl,
-              paddingBottom: spacing.xxl,
               gap: spacing.lg,
-              maxHeight: '88%',
+              maxHeight: '86%',
             },
             shadow.card,
           ]}>
           <View style={{ alignItems: 'center', gap: 4 }}>
-            <View
-              style={{ width: 44, height: 5, borderRadius: 3, backgroundColor: theme.surfaceSoft, marginBottom: 6 }}
-            />
             <Heading>어젯밤은 잘 주무셨나요?</Heading>
             <Caption>
               {solMin !== null ? `${dateLabel} · ${solMin.toFixed(0)}분 만에 잠들었어요` : dateLabel}
@@ -172,7 +167,6 @@ export function SleepReviewPopup({
             {rating > 0 && note === null ? (
               <Caption>특이사항까지 골라야 저장할 수 있어요.</Caption>
             ) : null}
-            <Button label="나중에 할게요" variant="ghost" onPress={onSkip} />
           </View>
         </View>
       </View>

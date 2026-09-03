@@ -257,6 +257,14 @@ static int           calibAttempts   = 0;
 static float g_restingBpm       = NAN;   // 이번 세션의 안정심박수
 static float g_onsetHrThreshold = NAN;   // 입면 기준 = 안정심박수 - HR_DROP_BPM
 
+// ---- 미입면 원인 집계 (관리자 화면에 "왜 못 잤는지"를 남기기 위해) ----
+//      NO_ONSET_REASON_* 값을 그대로 서버로 올린다.
+static const int NO_ONSET_REASON_UNKNOWN = 0;
+static const int NO_ONSET_REASON_HR      = 1;   // 심박이 기준(안정심박-10)보다 높게 유지
+static const int NO_ONSET_REASON_MOTION  = 2;   // 움직임이 계속 감지됨
+static const int NO_ONSET_REASON_SENSOR  = 3;   // 심박/센서 데이터가 제대로 안 들어옴
+static int epochsBlockedHr = 0, epochsBlockedMotion = 0, epochsBlockedSensor = 0;
+
 // ---- 입면 추정(에폭) 상태 ----
 static unsigned long lastEpochStartMs = 0;
 static float epochMotionAccum = 0.0f;
@@ -779,6 +787,13 @@ static void evaluateEpochAndOnset(unsigned long now) {
 
   bool quietEpoch = motionQuiet && hrQuiet;
 
+  // 조용하지 않았다면 무엇이 막았는지 세어 둔다(미입면 원인 보고용)
+  if (!quietEpoch) {
+    if (calibState == CAL_READY && epochHrCount < MIN_HR_SAMPLES_PER_EPOCH) epochsBlockedSensor++;
+    else if (!hrQuiet)                                                      epochsBlockedHr++;
+    if (!motionQuiet)                                                       epochsBlockedMotion++;
+  }
+
   if (quietEpoch) continuousQuietEpochs++;
   else            continuousQuietEpochs = 0;
 
@@ -879,6 +894,7 @@ static void startSession() {
   epochHrSum = 0; epochHrCount = 0; epochHrAbove = 0;
   continuousQuietEpochs = 0;
   isAsleepConfirmed = false;
+  epochsBlockedHr = epochsBlockedMotion = epochsBlockedSensor = 0;
 
   calibState    = CAL_NONE;      // 워밍업이 끝나면 CAL_COLLECT 로 전환
   calibPhaseMs  = sessionStartMs;
@@ -950,15 +966,31 @@ static void onSleepOnsetConfirmed(unsigned long onsetMs) {
 }
 
 // [변경 2] 세션 최대시간(60분) 내 미입면 — 결과 기록 후 기기 전원 차단
+// 가장 많이 막았던 요인을 미입면 원인으로 본다.
+static int noOnsetReason() {
+  if (calibState == CAL_FAILED) return NO_ONSET_REASON_SENSOR;
+  int best = NO_ONSET_REASON_UNKNOWN, count = 0;
+  if (epochsBlockedSensor > count) { count = epochsBlockedSensor; best = NO_ONSET_REASON_SENSOR; }
+  if (epochsBlockedHr     > count) { count = epochsBlockedHr;     best = NO_ONSET_REASON_HR; }
+  if (epochsBlockedMotion > count) { count = epochsBlockedMotion; best = NO_ONSET_REASON_MOTION; }
+  return best;
+}
+
 static void finalizeNoOnset() {
   float solMin = SESSION_MAX_MS / 60000.0f;
+  int reason = noOnsetReason();
   Serial.print("# NO ONSET (timeout). SOL capped=");
   Serial.print(solMin,1);
-  Serial.println(" min");
+  Serial.print(" min, reason=");
+  Serial.print(reason);
+  Serial.print(" (hr=");   Serial.print(epochsBlockedHr);
+  Serial.print(" motion=");Serial.print(epochsBlockedMotion);
+  Serial.print(" sensor=");Serial.print(epochsBlockedSensor);
+  Serial.println(")");
 
   recordResult(&g_profile, sessionTemp, solMin);
   saveProfile(g_personId);
-  sendServerFlag("NO_ONSET", solMin, 0);
+  sendServerFlag("NO_ONSET", solMin, (float)reason);
 
   manualTempSet = false;
   shutdownDevice("NO_ONSET_TIMEOUT");

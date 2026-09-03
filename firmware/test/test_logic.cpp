@@ -203,6 +203,22 @@ int main() {
   check("기기 ID = MAC 기반 DORMX-24 6F 28 AA BB CC",
         strcmp(g_deviceId, "DORMX-246F28AABBCC") == 0);
 
+  // =====================================================================
+  // 미입면 원인 집계 — 관리자 화면에 "왜 못 잤는지"를 남긴다
+  // =====================================================================
+  calibState = CAL_READY;
+  epochsBlockedHr = epochsBlockedMotion = epochsBlockedSensor = 0;
+  epochsBlockedHr = 12; epochsBlockedMotion = 3;
+  check("심박이 주로 막았으면 원인=심박", noOnsetReason() == NO_ONSET_REASON_HR);
+  epochsBlockedMotion = 20;
+  check("움직임이 더 많았으면 원인=움직임", noOnsetReason() == NO_ONSET_REASON_MOTION);
+  epochsBlockedSensor = 40;
+  check("심박 샘플이 계속 부족했으면 원인=센서", noOnsetReason() == NO_ONSET_REASON_SENSOR);
+  epochsBlockedHr = epochsBlockedMotion = epochsBlockedSensor = 0;
+  check("막힌 적이 없으면 원인=알 수 없음", noOnsetReason() == NO_ONSET_REASON_UNKNOWN);
+  calibState = CAL_FAILED;
+  check("안정심박수를 못 잡았으면 원인=센서", noOnsetReason() == NO_ONSET_REASON_SENSOR);
+
   printf("\n%s (실패 %d건)\n", fails ? "일부 실패" : "모든 검증 통과", fails);
   return fails ? 1 : 0;
 }

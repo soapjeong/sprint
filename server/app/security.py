@@ -24,7 +24,7 @@ _SCRYPT_R = 8
 _SCRYPT_P = 1
 _SALT_BYTES = 16
 
-MIN_PASSWORD_LEN = 8
+MIN_PASSWORD_LEN = 4
 
 
 def admin_token() -> str:

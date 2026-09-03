@@ -120,9 +120,13 @@ def test_invalid_user_id_rejected(client):
 
 
 def test_short_password_rejected(client):
+    """비밀번호는 4자 이상 — 소수 인원 배포라 길이 요건을 낮췄다."""
+    assert client.post(
+        "/api/users", json={"user_id": "sub09", "name": "", "password": "123"}
+    ).status_code == 422
     assert client.post(
         "/api/users", json={"user_id": "sub09", "name": "", "password": "1234"}
-    ).status_code == 422
+    ).status_code == 201
 
 
 # ---------------------------------------------------------------- 업로드 권한
@@ -318,6 +322,23 @@ def test_heartbeat_reports_link_state(client):
     assert client.post(
         "/api/ingest/heartbeat", headers=INGEST, json={"device_id": device_id, "link_state": "정상"}
     ).status_code == 422
+
+
+def test_no_onset_reason_is_recorded(client):
+    """관리자 화면에 '왜 못 잤는지'를 보여주기 위해 펌웨어가 보낸 원인을 저장한다."""
+    _, device_id = register(client)
+    for code, expected in [(1, "hr_high"), (2, "motion"), (3, "sensor"), (0, "unknown")]:
+        flag(client, device_id, "SESSION_START", [38.5])
+        flag(client, device_id, "NO_ONSET", [60.0, code])
+        flag(client, device_id, "POWER_OFF", [0, 0])
+        session = client.get("/api/users/sub01/sessions", headers=auth(client)).json()[0]
+        assert session["outcome"] == "no_onset"
+        assert session["failure_reason"] == expected
+
+    # 입면에 성공한 밤에는 원인이 남지 않는다
+    flag(client, device_id, "SESSION_START", [38.5])
+    flag(client, device_id, "SLEEP_ONSET", [20.0])
+    assert client.get("/api/users/sub01/sessions", headers=auth(client)).json()[0]["failure_reason"] is None
 
 
 def test_onset_time_is_recorded(client):

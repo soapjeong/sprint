@@ -89,7 +89,7 @@ export type UserSummary = {
   best_temp_c: number | null;
   temp_stats: TempStat[];
   recent_sessions: Session[];
-  /** 아직 별점을 남기지 않은 최근 세션 — 있으면 홈에 평가 카드를 띄운다 */
+  /** 아직 별점을 남기지 않은 최근 기기 사용 — 있으면 홈에 평가 카드를 띄운다 */
   pending_review: Session | null;
   avg_rating: number | null;
 };

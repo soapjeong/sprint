@@ -37,9 +37,8 @@ export default function HomeScreen() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState('');
-  const [skipped, setSkipped] = useState<number | null>(null);
 
-  const spokenFor = useRef<number | null>(null);   // 세션당 한 번만 안내 음성을 낸다
+  const spokenFor = useRef<number | null>(null);   // 기기 사용 한 번당 안내 음성은 한 번만
   const token = settings.userToken ?? '';
   const deviceId = settings.deviceId;
 
@@ -49,6 +48,13 @@ export default function HomeScreen() {
       const next = await api.summary(settings.serverUrl, token, settings.userId);
       setSummary(next);
       setError('');
+
+      // 다른 기기에서 로그인했거나 저장값이 비었으면, 이미 등록해 둔 기기를 다시 물어온다
+      if (!deviceId && next.devices.length > 0) {
+        await update({ deviceId: next.devices[0].device_id });
+        return;
+      }
+
       if (deviceId) {
         const st = await api.deviceStatus(settings.serverUrl, token, deviceId);
         setStatus(st);
@@ -86,9 +92,9 @@ export default function HomeScreen() {
     }, [load]),
   );
 
-  // 입면이 확정된 세션만 평가를 물어본다
+  // 입면이 확정된 기기 사용만 평가를 물어본다
   const pending = summary?.pending_review ?? null;
-  const askReview = pending !== null && pending.outcome === 'onset' && pending.session_id !== skipped;
+  const askReview = pending !== null && pending.outcome === 'onset';
   useEffect(() => {
     setReviewOpen(askReview);
   }, [askReview]);
@@ -241,11 +247,7 @@ export default function HomeScreen() {
             </Tile>
             <Tile label="히터 상태">
               <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: '800' }}>{heaterText}</Text>
-              {status?.skin_c != null ? (
-                <Caption>피부 {status.skin_c.toFixed(1)}℃</Caption>
-              ) : (
-                <Caption>{running ? '곧 데이터가 들어와요' : '시작하면 표시돼요'}</Caption>
-              )}
+              <Caption>{running ? '잠들 때까지 지켜볼게요' : '시작하면 표시돼요'}</Caption>
             </Tile>
           </Row>
 
@@ -279,33 +281,35 @@ export default function HomeScreen() {
           )}
         </Card>
 
-        {/* 수면 입면 분석 */}
-        <Card>
-          <Row style={{ alignItems: 'center' }}>
-            <Heading>수면 입면 분석</Heading>
-            <View style={{ flex: 1 }} />
-            <Pressable
-              onPress={() => last && router.push(`/user/session/${last.session_id}`)}
-              disabled={!last}
-              hitSlop={8}>
-              <Text style={{ color: theme.moon, fontSize: 14, fontWeight: '700', opacity: last ? 1 : 0.4 }}>
-                자세히 보기 →
+        {/* 수면 입면 분석 — 카드 전체를 누르면 상세로 넘어간다 */}
+        <Pressable
+          onPress={() => last && router.push(`/user/session/${last.session_id}`)}
+          disabled={!last}
+          accessibilityRole="button"
+          accessibilityLabel="수면 입면 분석 자세히 보기"
+          style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
+          <Card>
+            <Row style={{ alignItems: 'center' }}>
+              <Heading>수면 입면 분석</Heading>
+              <View style={{ flex: 1 }} />
+              <Text style={{ color: theme.moon, fontSize: 20, fontWeight: '700', opacity: last ? 1 : 0.3 }}>
+                ›
               </Text>
-            </Pressable>
-          </Row>
-          <Row>
-            <Tile label="입면시간" style={{ minHeight: 92 }}>
-              <Text style={{ color: theme.textPrimary, fontSize: 24, fontWeight: '800' }}>
-                {last ? `${formatMinutes(last.sol_min)}분` : '-'}
-              </Text>
-            </Tile>
-            <Tile label="잠든 시간" style={{ minHeight: 92 }}>
-              <Text style={{ color: theme.textPrimary, fontSize: 24, fontWeight: '800' }}>
-                {formatClock(last?.onset_at ?? null)}
-              </Text>
-            </Tile>
-          </Row>
-        </Card>
+            </Row>
+            <Row>
+              <Tile label="입면시간" style={{ minHeight: 92 }}>
+                <Text style={{ color: theme.textPrimary, fontSize: 24, fontWeight: '800' }}>
+                  {last ? `${formatMinutes(last.sol_min)}분` : '-'}
+                </Text>
+              </Tile>
+              <Tile label="잠든 시간" style={{ minHeight: 92 }}>
+                <Text style={{ color: theme.textPrimary, fontSize: 24, fontWeight: '800' }}>
+                  {formatClock(last?.onset_at ?? null)}
+                </Text>
+              </Tile>
+            </Row>
+          </Card>
+        </Pressable>
 
         <Pressable
           onPress={async () => {
@@ -340,10 +344,6 @@ export default function HomeScreen() {
         dateLabel={pending ? formatKoreanDate(new Date(pending.started_at)) : ''}
         solMin={pending?.sol_min ?? null}
         onSubmit={submitReview}
-        onSkip={() => {
-          setSkipped(pending?.session_id ?? null);
-          setReviewOpen(false);
-        }}
         submitting={reviewing}
         error={reviewError}
       />

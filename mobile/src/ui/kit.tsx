@@ -138,8 +138,13 @@ export function Button({
   style?: ViewStyle;
 }) {
   const off = disabled || loading;
-  const bg = variant === 'primary' ? theme.moon : variant === 'soft' ? theme.surfaceAlt : 'transparent';
-  const fg = variant === 'primary' ? theme.onAccent : theme.textPrimary;
+  // 비활성 상태는 투명도만 낮추면 탁해 보여서, 아예 가라앉은 색으로 바꾼다
+  const bg = off && variant === 'primary'
+    ? theme.surfaceAlt
+    : variant === 'primary' ? theme.moon : variant === 'soft' ? theme.surfaceAlt : 'transparent';
+  const fg = off && variant === 'primary'
+    ? theme.textMuted
+    : variant === 'primary' ? theme.onAccent : theme.textPrimary;
   return (
     <Pressable
       accessibilityRole="button"
@@ -154,7 +159,7 @@ export function Button({
           alignItems: 'center',
           justifyContent: 'center',
           minHeight: 52,
-          opacity: off ? 0.45 : pressed ? 0.85 : 1,
+          opacity: off ? 0.9 : pressed ? 0.85 : 1,
           borderWidth: variant === 'ghost' ? StyleSheet.hairlineWidth : 0,
           borderColor: theme.border,
         },

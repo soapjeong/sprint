@@ -81,6 +81,8 @@ app.add_middleware(
 # 세션을 마감시키는 플래그와, 그때 기록할 결과
 TERMINAL_FLAGS = {"SLEEP_ONSET": "onset", "NO_ONSET": "no_onset"}
 CLOSING_FLAGS = {"POWER_OFF", "SESSION_DONE"}
+# 펌웨어가 NO_ONSET 과 함께 보내는 원인 코드
+NO_ONSET_REASONS = {0: "unknown", 1: "hr_high", 2: "motion", 3: "sensor"}
 # 세션이 닫힌 뒤에도 이 시간(초) 안에 도착한 샘플은 그 세션에 붙인다
 LATE_SAMPLE_WINDOW_S = 600
 
@@ -651,11 +653,14 @@ def ingest_event(payload: EventIn) -> IngestResult:
                     detail = "안정심박수 기록"
                 elif flag in TERMINAL_FLAGS:
                     conn.execute(
-                        "UPDATE sessions SET sol_min=?, outcome=?, onset_at=? WHERE session_id=?",
+                        "UPDATE sessions SET sol_min=?, outcome=?, onset_at=?, failure_reason=?"
+                        " WHERE session_id=?",
                         (
                             _value(payload.values, 0),
                             TERMINAL_FLAGS[flag],
                             now if flag == "SLEEP_ONSET" else None,
+                            NO_ONSET_REASONS.get(int(_value(payload.values, 1) or 0), "unknown")
+                            if flag == "NO_ONSET" else None,
                             session_id,
                         ),
                     )

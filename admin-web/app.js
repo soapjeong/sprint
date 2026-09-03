@@ -10,6 +10,13 @@ const NOTE_LABEL = {
   none: '없음',
   other: '기타',
 };
+const FAILURE_LABEL = {
+  hr_high: '심박수가 안정심박수보다 높게 유지됨',
+  motion: '움직임이 계속 감지됨',
+  sensor: '센서 데이터 오류·수신 끊김',
+  unknown: '원인 미상',
+};
+
 const OUTCOME = {
   onset: { label: '입면 성공', color: 'var(--series-2)' },
   no_onset: { label: '미입면(60분)', color: 'var(--warning)' },
@@ -68,48 +75,42 @@ function outcomeBadge(outcome) {
 
 // ---------------------------------------------------------------- 차트
 /**
- * 설정 온도별 평균 SOL — 단일 계열 막대차트.
- * 가장 성적이 좋은 온도는 색과 함께 "최적" 라벨을 붙여 색만으로 구분하지 않는다.
+ * 사람별 "기기 사용 횟수 대비 입면 성공 비율" — 단일 계열 가로 막대.
+ * 전체 평균은 점선 한 줄로 같이 그려 비교 기준을 준다(색만으로 구분하지 않음).
  */
-function tempBarChart(bars) {
-  if (!bars.length) return '<p class="hint">입면에 성공한 세션이 아직 없습니다.</p>';
-  const W = 640, H = 220, PAD = 16, TOP = 22, BOTTOM = 30;
-  const plotH = H - TOP - BOTTOM;
-  const plotW = W - PAD * 2;
-  const max = Math.max(...bars.map((b) => b.avg));
-  const niceMax = Math.ceil((max * 1.15) / 5) * 5 || 10;
-  const slot = plotW / bars.length;
-  const barW = Math.max(10, Math.min(72, slot - 8));
-  const bestIdx = bars.reduce((best, b, i) => (b.avg < bars[best].avg ? i : best), 0);
+function successRateChart(rows, overall) {
+  const usable = rows.filter((r) => r.session_count > 0);
+  if (!usable.length) return '<p class="hint">아직 기기 사용 기록이 없습니다.</p>';
 
-  const marks = bars.map((b, i) => {
-    const h = Math.max(2, (b.avg / niceMax) * plotH);
-    const x = PAD + i * slot + (slot - barW) / 2;
-    const y = TOP + plotH - h;
-    const isBest = i === bestIdx;
-    const r = Math.min(4, barW / 2, h);
-    const d = `M ${x} ${y + h} L ${x} ${y + r} Q ${x} ${y} ${x + r} ${y}
-               L ${x + barW - r} ${y} Q ${x + barW} ${y} ${x + barW} ${y + r} L ${x + barW} ${y + h} Z`;
+  const ROW_H = 38, PAD_L = 92, PAD_R = 64, TOP = 10;
+  const W = 640, H = TOP + usable.length * ROW_H + 26;
+  const plotW = W - PAD_L - PAD_R;
+
+  const bars = usable.map((r, i) => {
+    const rate = r.onset_count / r.session_count;
+    const y = TOP + i * ROW_H;
+    const w = Math.max(2, rate * plotW);
+    const label = `${Math.round(rate * 100)}% (${r.onset_count}/${r.session_count})`;
     return `
-      <path d="${d}" fill="${isBest ? 'var(--series-2)' : 'var(--series-1)'}"></path>
-      <text x="${x + barW / 2}" y="${y - 6}" text-anchor="middle" font-size="12"
-            font-weight="${isBest ? 700 : 500}" fill="var(--text-2)">
-        ${isBest ? `최적 ${b.avg.toFixed(0)}분` : `${b.avg.toFixed(0)}분`}
-      </text>
-      <text x="${x + barW / 2}" y="${H - 10}" text-anchor="middle" font-size="11" fill="var(--text-3)">
-        ${b.temp.toFixed(1)}℃
-      </text>
-      <title>${b.temp.toFixed(1)}℃ · 평균 ${b.avg.toFixed(1)}분 · ${b.count}회</title>`;
+      <rect x="${PAD_L}" y="${y + 8}" width="${plotW}" height="18" rx="9" fill="var(--surface-alt)"></rect>
+      <rect x="${PAD_L}" y="${y + 8}" width="${w}" height="18" rx="9" fill="var(--series-1)"></rect>
+      <text x="${PAD_L - 10}" y="${y + 21}" text-anchor="end" font-size="13" fill="var(--text-2)">${r.user_id}</text>
+      <text x="${PAD_L + plotW + 8}" y="${y + 21}" font-size="12" fill="var(--text-2)">${label}</text>
+      <title>${r.user_id} · 기기 사용 ${r.session_count}회 중 입면 성공 ${r.onset_count}회</title>`;
   }).join('');
 
+  const overallX = PAD_L + overall * plotW;
   return `
     <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img"
-         aria-label="설정 온도별 평균 잠들기 시간 막대 그래프">
-      <line x1="${PAD}" x2="${W - PAD}" y1="${TOP + plotH}" y2="${TOP + plotH}" stroke="var(--grid)"></line>
-      <text x="${PAD}" y="${TOP - 8}" font-size="11" fill="var(--text-3)">${niceMax}분</text>
-      ${marks}
+         aria-label="사람별 기기 사용 대비 입면 성공 비율">
+      ${bars}
+      <line x1="${overallX}" x2="${overallX}" y1="${TOP}" y2="${TOP + usable.length * ROW_H}"
+            stroke="var(--text-3)" stroke-width="1.5" stroke-dasharray="4 4"></line>
+      <text x="${overallX}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--text-3)">
+        전체 평균 ${Math.round(overall * 100)}%
+      </text>
     </svg>
-    <figcaption>막대에 마우스를 올리면 측정 횟수까지 보입니다.</figcaption>`;
+    <figcaption>막대에 마우스를 올리면 사용 횟수까지 보입니다.</figcaption>`;
 }
 
 // ---------------------------------------------------------------- 화면
@@ -145,10 +146,14 @@ async function loadUsers() {
     (acc, r) => ({ sessions: acc.sessions + r.session_count, onsets: acc.onsets + r.onset_count }),
     { sessions: 0, onsets: 0 },
   );
+  const overall = totals.sessions ? totals.onsets / totals.sessions : 0;
   $('totals').innerHTML =
     statTile('등록 사용자', state.users.length, '명') +
-    statTile('누적 세션', totals.sessions, '회') +
-    statTile('입면 성공', totals.onsets, '회');
+    statTile('전체 기기 사용', totals.sessions, '회') +
+    statTile('입면 성공', totals.onsets, '회') +
+    statTile('전체 입면 성공률', `${Math.round(overall * 100)}%`,
+             `${totals.onsets}/${totals.sessions}`);
+  $('rate-chart').innerHTML = successRateChart(state.users, overall);
 
   showSection('workspace');
   if (state.users.length === 0) {
@@ -165,7 +170,7 @@ async function loadUsers() {
  *  1) 입면 성공 여부 2) start 누른 시간 3) 입면 성공 시간
  *  4) 사용자의 평점 및 특이사항 5) 목표 온도와 안정심박수 */
 function sessionTable(sessions) {
-  if (!sessions.length) return '<p class="muted">세션 기록이 없습니다.</p>';
+  if (!sessions.length) return '<p class="muted">기기 사용 기록이 없습니다.</p>';
   const rows = sessions.map((s) => {
     const ok = s.outcome === 'onset';
     const verdict = ok
@@ -177,10 +182,16 @@ function sessionTable(sessions) {
       ? (NOTE_LABEL[s.note_code] || s.note_code) +
         (s.note_code === 'other' && s.note_text ? ` (${s.note_text})` : '')
       : '<span class="muted">-</span>';
+    const why = ok
+      ? '<span class="muted">-</span>'
+      : s.outcome === 'no_onset'
+        ? (FAILURE_LABEL[s.failure_reason] || FAILURE_LABEL.unknown)
+        : '<span class="muted">-</span>';
     return `
       <tr>
         <td class="num">${s.session_id}</td>
         <td>${verdict}</td>
+        <td>${why}</td>
         <td>${fmtDateTime(s.started_at)}</td>
         <td>${ok ? fmtDateTime(s.onset_at) : '<span class="muted">-</span>'}</td>
         <td class="num">${ok ? fmtNum(s.sol_min) : '-'}</td>
@@ -197,9 +208,10 @@ function sessionTable(sessions) {
           <tr>
             <th class="num">#</th>
             <th>입면 성공</th>
+            <th>실패 원인</th>
             <th>시작 누른 시간</th>
             <th>입면 성공 시간</th>
-            <th class="num">SOL(분)</th>
+            <th class="num">입면시간(분)</th>
             <th>평점</th>
             <th>특이사항</th>
             <th class="num">목표 온도(℃)</th>
@@ -221,16 +233,6 @@ async function loadUser(userId) {
   const avgSol = onsets.length ? onsets.reduce((a, s) => a + s.sol_min, 0) / onsets.length : null;
   const avgRating = rated.length ? rated.reduce((a, s) => a + s.rating, 0) / rated.length : null;
 
-  const byTemp = new Map();
-  onsets.forEach((s) => {
-    if (s.target_temp_c === null) return;
-    const cur = byTemp.get(s.target_temp_c) || { sum: 0, count: 0 };
-    byTemp.set(s.target_temp_c, { sum: cur.sum + s.sol_min, count: cur.count + 1 });
-  });
-  const bars = [...byTemp.entries()]
-    .map(([temp, v]) => ({ temp, avg: v.sum / v.count, count: v.count }))
-    .sort((a, b) => a.temp - b.temp);
-
   $('user-panel').innerHTML = `
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:flex-start">
@@ -241,9 +243,11 @@ async function loadUser(userId) {
         <button id="export" class="secondary">CSV 내려받기</button>
       </div>
       <div class="stats" style="margin-top:14px">
-        ${statTile('세션', sessions.length, '회')}
+        ${statTile('기기 사용', sessions.length, '회')}
         ${statTile('입면 성공', onsets.length, '회')}
-        ${statTile('평균 SOL', fmtNum(avgSol), '분')}
+        ${statTile('입면 성공률', sessions.length ? `${Math.round((onsets.length / sessions.length) * 100)}%` : '-',
+                   `${onsets.length}/${sessions.length}`)}
+        ${statTile('평균 입면시간', fmtNum(avgSol), '분')}
         ${statTile('평균 별점', avgRating ? avgRating.toFixed(1) : '-', '/ 5')}
       </div>
       <div style="margin-top:12px">
@@ -254,13 +258,8 @@ async function loadUser(userId) {
     </div>
 
     <div class="card">
-      <h2 style="margin-top:0">세션 기록</h2>
+      <h2 style="margin-top:0">기기 사용 기록</h2>
       ${sessionTable(sessions)}
-    </div>
-
-    <div class="card">
-      <h2 style="margin-top:0">설정 온도별 평균 잠들기 시간</h2>
-      <figure>${tempBarChart(bars)}</figure>
     </div>`;
 
   const button = document.getElementById('export');

@@ -49,8 +49,8 @@ export default function StartScreen() {
       setError('닉네임은 한글·영문·숫자로 2~16자로 지어주세요.');
       return;
     }
-    if (password.length < 8) {
-      setError('비밀번호는 8자 이상이어야 해요.');
+    if (password.length < 4) {
+      setError('비밀번호는 4자 이상이어야 해요.');
       return;
     }
     setBusy(true);
@@ -146,14 +146,14 @@ export default function StartScreen() {
               label="닉네임"
               value={nickname}
               onChangeText={setNickname}
-              placeholder="예: 민서"
+              placeholder="예: 홍길동"
               maxLength={16}
             />
             <Field
               label="비밀번호"
               value={password}
               onChangeText={setPassword}
-              placeholder="8자 이상"
+              placeholder="4자 이상"
               secureTextEntry
               onSubmitEditing={submit}
               returnKeyType="done"
