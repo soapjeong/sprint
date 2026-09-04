@@ -85,6 +85,11 @@ CLOSING_FLAGS = {"POWER_OFF", "SESSION_DONE"}
 NO_ONSET_REASONS = {0: "unknown", 1: "hr_high", 2: "motion", 3: "sensor"}
 # 세션이 닫힌 뒤에도 이 시간(초) 안에 도착한 샘플은 그 세션에 붙인다
 LATE_SAMPLE_WINDOW_S = 600
+# 이 기록을 만든 start 경로(펌웨어가 SESSION_START 의 v2 로 보낸다)
+START_SOURCES = {1: "button", 2: "app"}
+# 같은 start 를 두 번 받은 경우(브리지 재연결·기기 리부팅) 새 기록을 만들지 않는 시간(초).
+# 관리자 페이지의 "기기 사용"은 start 를 누른 횟수와 1:1 로 맞아야 한다.
+START_DEDUP_WINDOW_S = 60
 
 
 # ---------------------------------------------------------------- helpers
@@ -169,6 +174,21 @@ def _session_for_samples(conn: Any, device_id: str) -> Optional[Any]:
     if (datetime.now(timezone.utc) - ended).total_seconds() <= LATE_SAMPLE_WINDOW_S:
         return row
     return None
+
+
+def _repeat_start(session: Optional[Any]) -> bool:
+    """이미 열린 기록이 방금 시작된 것이라면, 이번 SESSION_START 는 같은 start 의 재수신이다.
+
+    브리지가 다시 붙거나 기기가 부팅 직후 한 번 더 보고할 때 "기기 사용" 기록이
+    두 줄로 늘어나는 것을 막는다(관리자 페이지는 start 를 누른 횟수만 세야 한다).
+    """
+    if session is None:
+        return False
+    try:
+        started = datetime.fromisoformat(session["started_at"])
+    except (ValueError, TypeError):
+        return False
+    return (datetime.now(timezone.utc) - started).total_seconds() <= START_DEDUP_WINDOW_S
 
 
 def _value(values: list[float], idx: int) -> Optional[float]:
@@ -627,20 +647,31 @@ def ingest_event(payload: EventIn) -> IngestResult:
         detail = ""
 
         if flag == "SESSION_START":
-            if session is not None:                       # 이전 세션이 안 닫혔으면 중단 처리
+            source = START_SOURCES.get(int(_value(payload.values, 1) or 0), "app")
+            repeat = _repeat_start(session)
+            if repeat:
+                # 같은 start 를 다시 받은 것뿐이므로 기록을 새로 만들지 않는다.
+                session_id = int(session["session_id"])
                 conn.execute(
-                    "UPDATE sessions SET ended_at=?, outcome=CASE outcome WHEN 'running' THEN 'aborted' ELSE outcome END"
-                    " WHERE session_id=?",
-                    (now, session["session_id"]),
+                    "UPDATE sessions SET device_start_ms=?, target_temp_c=?, start_source=? WHERE session_id=?",
+                    (payload.device_ms, _value(payload.values, 0), source, session_id),
                 )
-            session_id = db.insert_returning_id(
-                conn,
-                "INSERT INTO sessions(user_id, device_id, started_at, device_start_ms, target_temp_c)"
-                " VALUES(?,?,?,?,?)",
-                (user_id, payload.device_id, now, payload.device_ms, _value(payload.values, 0)),
-                "session_id",
-            )
-            detail = "세션 시작"
+                detail = "같은 start 재수신 — 기존 기록 유지"
+            else:
+                if session is not None:                   # 이전 세션이 안 닫혔으면 중단 처리
+                    conn.execute(
+                        "UPDATE sessions SET ended_at=?, outcome=CASE outcome WHEN 'running' THEN 'aborted' ELSE outcome END"
+                        " WHERE session_id=?",
+                        (now, session["session_id"]),
+                    )
+                session_id = db.insert_returning_id(
+                    conn,
+                    "INSERT INTO sessions(user_id, device_id, started_at, device_start_ms, target_temp_c, start_source)"
+                    " VALUES(?,?,?,?,?,?)",
+                    (user_id, payload.device_id, now, payload.device_ms, _value(payload.values, 0), source),
+                    "session_id",
+                )
+                detail = "세션 시작"
         else:
             session_id = int(session["session_id"]) if session else None
 
@@ -779,8 +810,9 @@ def admin_user_detail(user_id: str) -> dict[str, Any]:
 def admin_export_sessions(user_id: Optional[str] = None) -> PlainTextResponse:
     """세션 단위 CSV 내보내기(엑셀/논문용)."""
     query = (
-        "SELECT session_id, user_id, device_id, started_at, ended_at, target_temp_c,"
-        " resting_bpm, threshold_bpm, sol_min, outcome, rating, note_code, note_text FROM sessions"
+        "SELECT session_id, user_id, device_id, started_at, start_source, ended_at, target_temp_c,"
+        " resting_bpm, threshold_bpm, sol_min, outcome, onset_at, failure_reason,"
+        " rating, note_code, note_text FROM sessions"
     )
     params: tuple[Any, ...] = ()
     if user_id:
@@ -791,9 +823,9 @@ def admin_export_sessions(user_id: Optional[str] = None) -> PlainTextResponse:
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(
-        ["session_id", "user_id", "device_id", "started_at", "ended_at",
+        ["session_id", "user_id", "device_id", "started_at", "start_source", "ended_at",
          "target_temp_c", "resting_bpm", "threshold_bpm", "sol_min", "outcome",
-         "rating", "note_code", "note_text"]
+         "onset_at", "failure_reason", "rating", "note_code", "note_text"]
     )
     with db.session_scope() as conn:
         for r in conn.execute(query, params).fetchall():

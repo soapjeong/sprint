@@ -86,7 +86,7 @@ int main() {
   check("start 전: 히터 NTC 측정 안 함(NaN)", isnan(readHeaterTempC()));
 
   lastControlMs = g_fakeMillis; lastLogMs = g_fakeMillis;
-  startSession();
+  startSession(START_TRIGGER_APP);
   check("start 직후: WARMUP 상태", sessionState == SESS_WARMUP);
   check("start 직후: 전 센서 측정 시작",
         g_bioSensorsActive && g_tempSensorsActive && !g_maxShutdown && !g_mpuAsleep);
@@ -183,7 +183,7 @@ int main() {
   profileClear(&g_profile);
   sessionState = SESS_IDLE;
   g_fakeMillis = 5000000;
-  startSession();
+  startSession(START_TRIGGER_APP);
   g_fakeMillis += SESSION_MAX_MS - 1000;
   updateSession(g_fakeMillis);
   check("59분 59초: 아직 세션 진행 중", sessionState == SESS_RUNNING);

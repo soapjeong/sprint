@@ -258,6 +258,8 @@ MIGRATIONS: dict[str, dict[str, str]] = {
     },
     "sessions": {
         "onset_at": "TEXT",
+        # 이 기록을 만든 start 경로: app(앱 start 버튼) | button(기기 버튼)
+        "start_source": "TEXT NOT NULL DEFAULT 'app'",
         # 미입면 원인: hr_high | motion | sensor | unknown
         "failure_reason": "TEXT",
         "rating": "INTEGER",

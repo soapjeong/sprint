@@ -1,7 +1,8 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as Speech from 'expo-speech';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import { Text } from '@/ui/typography';
 import { api, ApiError } from '@/api/client';
 import type { DeviceStatus, NoteCode, PendingDevice, UserSummary } from '@/api/types';
 import { useSettings } from '@/store/settings';

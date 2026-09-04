@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
+import { Text } from '@/ui/typography';
 import { api, ApiError } from '@/api/client';
 import type { Session } from '@/api/types';
 import { useSettings } from '@/store/settings';
@@ -48,15 +49,28 @@ function display(metric: Metric, value: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-/** 단위선 — 값 범위를 감싸는 눈금을 만든다. */
+/** 단위선 기본 간격 — 잠든 시간은 2시간, 입면시간은 5분, 온도는 0.5℃ 단위. */
+const TICK_STEP: Record<Metric, number> = { onset: 5, bedtime: 120, temp: 0.5 };
+const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/** 단위선 — 값 범위를 감싸는 눈금을 만든다. 줄이 너무 촘촘해지면 간격을 두 배로 늘린다. */
 function makeTicks(metric: Metric, values: number[]) {
-  const step = metric === 'onset' ? 5 : metric === 'temp' ? 5 : 30;
-  const lo = Math.floor(Math.min(...values) / step) * step - step;
-  const hi = Math.ceil(Math.max(...values) / step) * step + step;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  let step = TICK_STEP[metric];
+  while ((Math.ceil(max / step) * step - Math.floor(min / step) * step) / step > 8) step *= 2;
+
+  let lo = round3(Math.floor(min / step) * step);
+  let hi = round3(Math.ceil(max / step) * step);
+  // 눈금이 최소 세 줄은 되도록 위아래로 한 칸씩 넓힌다(선이 카드 끝에 붙지 않게).
+  while (round3((hi - lo) / step) < 2) {
+    lo = round3(lo - step);
+    hi = round3(hi + step);
+  }
+
   const ticks: { value: number; label: string }[] = [];
-  for (let v = lo; v <= hi; v += step) ticks.push({ value: v, label: display(metric, v) });
-  return ticks.length >= 2 ? ticks : [{ value: lo, label: display(metric, lo) },
-                                      { value: lo + step, label: display(metric, lo + step) }];
+  for (let v = lo; v <= hi + 1e-6; v = round3(v + step)) ticks.push({ value: v, label: display(metric, v) });
+  return ticks;
 }
 
 /** 홈의 "수면 입면 분석" 카드를 누르면 오는 화면 — 시안 그대로 탭 두 줄과 꺾은선 한 장. */

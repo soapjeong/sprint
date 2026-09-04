@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
+import { Text } from '@/ui/typography';
 import { api, ApiError } from '@/api/client';
 import { NOTE_OPTIONS, type Session } from '@/api/types';
 import { useSettings } from '@/store/settings';

@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
+import { Text } from '@/ui/typography';
 import { api, ApiError } from '@/api/client';
 import { useSettings } from '@/store/settings';
 import { radius, spacing, theme } from '@/theme';

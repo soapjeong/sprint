@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
-import { radius, theme } from '@/theme';
+import { font, radius, theme } from '@/theme';
 
 export type Series = {
   /** x축에 찍히는 라벨 (요일 / 날짜 / 월) */
@@ -72,6 +72,7 @@ export function TrendLineChart({
             x={PAD_L + plotW + 8}
             y={y(t.value) + 4}
             fill={theme.textMuted}
+            fontFamily={font.family}
             fontSize={11}>
             {t.label}
           </SvgText>
@@ -111,6 +112,7 @@ export function TrendLineChart({
         x={badgeX + badgeW / 2}
         y={24}
         fill={theme.onAccent}
+        fontFamily={font.family}
         fontSize={14}
         fontWeight="800"
         textAnchor="middle">
@@ -124,6 +126,7 @@ export function TrendLineChart({
           x={x(i)}
           y={height - 8}
           fill={i === data.length - 1 ? theme.textPrimary : theme.textMuted}
+          fontFamily={font.family}
           fontSize={12}
           fontWeight={i === data.length - 1 ? '700' : '500'}
           textAnchor="middle">

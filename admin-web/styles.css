@@ -57,7 +57,8 @@ header .tag {
   padding: 2px 8px; border-radius: 999px;
 }
 header .spacer { flex: 1; }
-main { max-width: 1040px; margin: 0 auto; padding: 24px 20px 64px; }
+/* 기기 사용 기록 표가 열 개 열이라, 넓은 화면에서는 가로 스크롤 없이 다 보이게 한다 */
+main { max-width: 1480px; margin: 0 auto; padding: 24px 20px 64px; }
 h2 { font-size: 16px; margin: 28px 0 12px; }
 
 .card {
@@ -93,7 +94,7 @@ button:disabled { opacity: .5; cursor: default; }
 
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
-th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th, td { text-align: left; padding: 10px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 th { color: var(--text-2); font-size: 12px; font-weight: 600; }
 tbody tr.clickable { cursor: pointer; }
 tbody tr.clickable:hover { background: var(--surface-alt); }

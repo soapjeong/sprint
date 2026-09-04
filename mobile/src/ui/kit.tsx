@@ -4,8 +4,6 @@ import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
   type TextInputProps,
   type ViewStyle,
@@ -13,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { radius, shadow, spacing, theme } from '@/theme';
+import { Text, TextInput } from './typography';
 
 /** 밤하늘 배경 — 위쪽이 살짝 밝고 아래로 짙어진다. */
 export function Screen({ children, edges = true }: { children: React.ReactNode; edges?: boolean }) {

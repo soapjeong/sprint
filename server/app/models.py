@@ -71,6 +71,7 @@ class SessionOut(BaseModel):
     sol_min: Optional[float] = None
     onset_at: Optional[str] = None
     failure_reason: Optional[str] = None
+    start_source: str = "app"
     outcome: str
     rating: Optional[int] = None
     note_code: Optional[str] = None

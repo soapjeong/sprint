@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, Pressable, Text, View } from 'react-native';
+import { Modal, Pressable, View } from 'react-native';
+import { Text } from '@/ui/typography';
 import type { DeviceStatus, PendingDevice } from '@/api/types';
 import { radius, spacing, theme } from '@/theme';
 import { Body, Button, Caption, Heading, Loading } from './kit';

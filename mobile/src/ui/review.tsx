@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, View } from 'react-native';
+import { Text, TextInput } from '@/ui/typography';
 import { NOTE_OPTIONS, type NoteCode } from '@/api/types';
 import { radius, shadow, spacing, theme } from '@/theme';
 import { Button, Caption, Heading } from './kit';

@@ -17,6 +17,9 @@ const FAILURE_LABEL = {
   unknown: '원인 미상',
 };
 
+/** 기록을 만든 start 경로 — 앱의 시작 버튼인지, 기기의 물리 버튼인지. */
+const START_SOURCE = { app: '앱', button: '기기 버튼' };
+
 const OUTCOME = {
   onset: { label: '입면 성공', color: 'var(--series-2)' },
   no_onset: { label: '미입면(60분)', color: 'var(--warning)' },
@@ -166,7 +169,7 @@ async function loadUsers() {
   await loadUser(state.users[state.activeIndex].user_id);
 }
 
-/** 요구된 다섯 가지를 한 표에 담는다:
+/** 표에는 start 를 눌러 시작된 기기 사용만 한 줄씩 들어간다.
  *  1) 입면 성공 여부 2) start 누른 시간 3) 입면 성공 시간
  *  4) 사용자의 평점 및 특이사항 5) 목표 온도와 안정심박수 */
 function sessionTable(sessions) {
@@ -193,6 +196,7 @@ function sessionTable(sessions) {
         <td>${verdict}</td>
         <td>${why}</td>
         <td>${fmtDateTime(s.started_at)}</td>
+        <td class="muted">${START_SOURCE[s.start_source] || START_SOURCE.app}</td>
         <td>${ok ? fmtDateTime(s.onset_at) : '<span class="muted">-</span>'}</td>
         <td class="num">${ok ? fmtNum(s.sol_min) : '-'}</td>
         <td>${stars(s.rating)}</td>
@@ -209,7 +213,8 @@ function sessionTable(sessions) {
             <th class="num">#</th>
             <th>입면 성공</th>
             <th>실패 원인</th>
-            <th>시작 누른 시간</th>
+            <th>start 누른 시간</th>
+            <th>시작</th>
             <th>입면 성공 시간</th>
             <th class="num">입면시간(분)</th>
             <th>평점</th>
@@ -259,6 +264,7 @@ async function loadUser(userId) {
 
     <div class="card">
       <h2 style="margin-top:0">기기 사용 기록</h2>
+      <p class="hint" style="margin-top:-6px">start 를 눌러 시작된 사용만 한 줄씩 기록됩니다.</p>
       ${sessionTable(sessions)}
     </div>`;
 

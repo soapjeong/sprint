@@ -111,6 +111,11 @@ enum SafetyState {
 //  OFF    : 종료(히터·센서 정지)
 enum SessionState { SESS_IDLE = 0, SESS_WARMUP, SESS_RUNNING, SESS_COOLDOWN, SESS_OFF };
 
+// 이번 사용을 시작시킨 경로 — SESSION_START 의 v2 로 서버에 함께 보낸다.
+// (서버/관리자 페이지는 start 를 눌러 시작된 기록만 "기기 사용"으로 집계한다)
+static const uint8_t START_TRIGGER_BUTTON = 1;   // 기기의 물리 start 버튼
+static const uint8_t START_TRIGGER_APP    = 2;   // 앱에서 보낸 start 명령
+
 // ===========================================================================
 // 입면(Sleep Onset) 추정 — 1분 에폭 누적
 // ===========================================================================
@@ -205,7 +210,7 @@ static void loadProfile(const char* id);
 static void saveProfile(const char* id);
 static void eraseProfile(const char* id);
 
-static void startSession();
+static void startSession(uint8_t trigger);
 static void onSleepOnsetConfirmed(unsigned long onsetMs);
 static void finalizeNoOnset();
 static void updateSession(unsigned long now);
@@ -870,7 +875,7 @@ static void sendServerFlag(const char* flag, float v1, float v2) {
 // ===========================================================================
 // 세션 제어
 // ===========================================================================
-static void startSession() {
+static void startSession(uint8_t trigger) {
   if (safetyState != STATE_NORMAL) {
     Serial.println("# START 거부: FAULT 상태. 먼저 'r' 로 해제하세요.");
     return;
@@ -921,7 +926,8 @@ static void startSession() {
   Serial.print("# 워밍업 후 ");
   Serial.print(CALIB_COLLECT_MS / 1000UL);
   Serial.println("초 평균을 이번 세션의 안정심박수로 사용합니다.");
-  sendServerFlag("SESSION_START", sessionTemp, 0);
+  // v2 = 이번 사용을 시작시킨 경로. 서버는 이 값이 있는 기록만 "기기 사용"으로 남긴다.
+  sendServerFlag("SESSION_START", sessionTemp, (float)trigger);
 }
 
 // 입면 확정 시점 (에폭 로직에서 호출) — 측정 기록 후, 설정 시간만큼 가온 유지(Cooldown)
@@ -1133,7 +1139,7 @@ static void handleSerial(float skinC, float heaterC) {
         Serial.print("# person="); Serial.print(g_personId);
         Serial.print(" bins=");    Serial.println(g_profile.nBins);
       } else if (strcmp(buf,"start") == 0) {
-        startSession();
+        startSession(START_TRIGGER_APP);
       } else if (strcmp(buf,"abort") == 0) {
         pwmWrite(0);
         SETPOINT_C = 0;
@@ -1276,7 +1282,7 @@ void loop() {
   static bool btnPrev = HIGH;
   bool btn = digitalRead(START_BTN_PIN);
   if (btnPrev == HIGH && btn == LOW
-      && (sessionState == SESS_IDLE || sessionState == SESS_OFF)) startSession();
+      && (sessionState == SESS_IDLE || sessionState == SESS_OFF)) startSession(START_TRIGGER_BUTTON);
   btnPrev = btn;
 
   // --- 제어 주기 (1초) ---

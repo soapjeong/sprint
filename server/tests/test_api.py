@@ -188,14 +188,44 @@ def test_no_onset_session_recorded_as_timeout(client):
     assert sessions[0]["sol_min"] == 60.0
 
 
-def test_new_session_closes_previous_open_one(client):
+def test_repeated_start_keeps_one_usage_record(client):
+    """브리지 재연결·기기 리부팅으로 SESSION_START 가 한 번 더 와도 기록은 한 줄이다."""
     _, device_id = register(client)
     flag(client, device_id, "SESSION_START", [39.0])
+    flag(client, device_id, "SESSION_START", [38.0])
+    sessions = client.get("/api/users/sub01/sessions", headers=auth(client)).json()
+    assert len(sessions) == 1
+    assert sessions[0]["outcome"] == "running"
+    assert sessions[0]["target_temp_c"] == 38.0
+
+
+def test_new_session_closes_previous_open_one(client):
+    """앞선 사용이 안 닫힌 채 한참 뒤 start 를 다시 누르면, 그건 새로운 기기 사용이다."""
+    _, device_id = register(client)
+    flag(client, device_id, "SESSION_START", [39.0])
+    long_ago = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat(timespec="seconds")
+    with db.session_scope() as conn:
+        conn.execute("UPDATE sessions SET started_at=?", (long_ago,))
     flag(client, device_id, "SESSION_START", [38.0])
     sessions = client.get("/api/users/sub01/sessions", headers=auth(client)).json()
     assert len(sessions) == 2
     assert sessions[1]["outcome"] == "aborted"      # 앞선 세션이 정리됨
     assert sessions[0]["outcome"] == "running"
+
+
+def test_start_source_recorded_for_admin(client):
+    """기기 사용 기록에는 어느 start 로 시작했는지가 남는다(앱 / 기기 버튼)."""
+    _, device_id = register(client)
+    flag(client, device_id, "SESSION_START", [38.5, 2])       # 2 = 앱 start 명령
+    assert client.get("/api/users/sub01/sessions", headers=auth(client)).json()[0]["start_source"] == "app"
+
+    flag(client, device_id, "POWER_OFF", [0, 0])
+    with db.session_scope() as conn:
+        conn.execute("UPDATE sessions SET started_at=?",
+                     ((datetime.now(timezone.utc) - timedelta(hours=3)).isoformat(timespec="seconds"),))
+    flag(client, device_id, "SESSION_START", [38.5, 1])       # 1 = 기기의 물리 버튼
+    detail = client.get(f"/api/admin/users/sub01", headers=ADMIN).json()
+    assert [s["start_source"] for s in detail["sessions"]][:2] == ["button", "app"]
 
 
 def test_late_samples_attach_to_recently_closed_session(client):

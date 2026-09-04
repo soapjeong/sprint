@@ -27,6 +27,9 @@ export const theme = {
 
 export type Theme = typeof theme;
 
+/** 글씨체 — 둥글둥글한 주아체(Jua) 하나로 앱 전체를 통일한다. */
+export const font = { family: 'Jua_400Regular' };
+
 /** 둥글둥글하게 — 카드는 크게, 버튼은 알약처럼 */
 export const radius = { tile: 22, card: 28, pill: 999, sheet: 34 };
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 22, xxl: 30 };
