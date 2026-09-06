@@ -43,7 +43,7 @@
       ]
     ],
     "extra": {
-      "defaultServerUrl": "http://localhost:8000"
+      "defaultServerUrl": "https://dormx-sleep-api-1uut.onrender.com"
     }
   }
 }
