@@ -21,6 +21,8 @@ export default function StartScreen() {
   const [nickname, setNickname] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  /** 무료 서버가 자고 있으면 첫 요청이 오래 걸린다 — 기다리는 동안 안내를 띄운다. */
+  const [waking, setWaking] = useState(false);
   const [error, setError] = useState('');
   // 배포 빌드에는 서버 주소가 이미 들어 있다(app.json 의 extra.defaultServerUrl).
   // 개발·현장 점검용으로 로고를 길게 누르면 주소를 바꿀 수 있게 열어둔다.
@@ -55,6 +57,7 @@ export default function StartScreen() {
       return;
     }
     setBusy(true);
+    const wakeHint = setTimeout(() => setWaking(true), 8000);
     try {
       const base = serverUrl.trim() || settings.serverUrl;
       const auth =
@@ -73,6 +76,8 @@ export default function StartScreen() {
             : err.message,
       );
     } finally {
+      clearTimeout(wakeHint);
+      setWaking(false);
       setBusy(false);
     }
   }
@@ -160,6 +165,11 @@ export default function StartScreen() {
               returnKeyType="done"
             />
             <Button label={mode === 'signup' ? '시작하기' : '들어가기'} onPress={submit} loading={busy} />
+            {waking ? (
+              <Caption color={theme.moon}>
+                서버를 깨우는 중이에요. 한동안 쓰지 않았다면 1분까지 걸릴 수 있어요.
+              </Caption>
+            ) : null}
             <Caption>
               {mode === 'signup'
                 ? '닉네임으로 내 기록이 저장돼요. 비밀번호는 나만 볼 수 있게 지켜줘요.'

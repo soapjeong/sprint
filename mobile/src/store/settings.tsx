@@ -12,7 +12,14 @@ export type Settings = {
   deviceId: string | null;
 };
 
+/**
+ * 앱이 기본으로 바라볼 서버 주소.
+ *   1) 빌드할 때 EXPO_PUBLIC_SERVER_URL 을 주면 그 값
+ *   2) 없으면 app.json 의 expo.extra.defaultServerUrl  ← 보통 여기만 고치면 된다
+ * 설치한 뒤에도 첫 화면에서 달 아이콘을 길게 누르면 주소를 바꿀 수 있다.
+ */
 const defaultServerUrl =
+  process.env.EXPO_PUBLIC_SERVER_URL ??
   (Constants.expoConfig?.extra as { defaultServerUrl?: string } | undefined)?.defaultServerUrl ??
   'http://localhost:8000';
 

@@ -17,20 +17,41 @@ export class ApiError extends Error {
   }
 }
 
-const TIMEOUT_MS = 8000;
+const TIMEOUT_MS = 12000;
+/** 무료 호스팅(Render 등)은 한동안 요청이 없으면 잠들고, 깨어나는 데 1분 가까이 걸린다. */
+const WAKE_TIMEOUT_MS = 60000;
 
 function normalizeBase(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
   return trimmed.startsWith('http') ? trimmed : `http://${trimmed}`;
 }
 
-async function request<T>(
+type RequestOptions = {
+  method?: string;
+  body?: unknown;
+  userToken?: string | null;
+  /** 서버가 자고 있을 수 있는 요청(로그인 등)은 한 번 더, 더 오래 기다린다. */
+  wake?: boolean;
+};
+
+async function request<T>(baseUrl: string, path: string, options: RequestOptions = {}): Promise<T> {
+  try {
+    return await attempt<T>(baseUrl, path, options, TIMEOUT_MS);
+  } catch (err) {
+    // 서버에 닿지도 못한 경우(status 0)만 다시 시도한다. HTTP 오류는 그대로 올린다.
+    if (!options.wake || !(err instanceof ApiError) || err.status !== 0) throw err;
+    return attempt<T>(baseUrl, path, options, WAKE_TIMEOUT_MS);
+  }
+}
+
+async function attempt<T>(
   baseUrl: string,
   path: string,
-  options: { method?: string; body?: unknown; userToken?: string | null } = {},
+  options: RequestOptions,
+  timeoutMs: number,
 ): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(normalizeBase(baseUrl) + path, {
       method: options.method ?? 'GET',
@@ -53,12 +74,12 @@ async function request<T>(
     if (err instanceof ApiError) throw err;
     const target = normalizeBase(baseUrl);
     if (err instanceof Error && err.name === 'AbortError') {
-      throw new ApiError(0, `서버가 응답하지 않습니다 (${target}). 서버가 켜져 있는지 확인하세요.`);
+      throw new ApiError(0, `서버가 응답하지 않습니다 (${target}). 잠시 뒤 다시 시도해 주세요.`);
     }
     throw new ApiError(
       0,
       `서버에 연결할 수 없습니다 (${target}).\n` +
-        'PC 에서 `python server/run.py` 로 서버를 켰는지, 주소가 맞는지 확인하세요.',
+        '주소가 맞는지, 서버가 켜져 있는지 확인해 주세요.',
     );
   } finally {
     clearTimeout(timer);
@@ -66,13 +87,13 @@ async function request<T>(
 }
 
 export const api = {
-  health: (base: string) => request<{ status: string }>(base, '/api/health'),
+  health: (base: string) => request<{ status: string }>(base, '/api/health', { wake: true }),
 
   // --- 첫 화면: 가입 / 로그인 / 기기 등록 ---
   signUp: (base: string, user_id: string, name: string, password: string) =>
-    request<AuthResult>(base, '/api/users', { method: 'POST', body: { user_id, name, password } }),
+    request<AuthResult>(base, '/api/users', { method: 'POST', body: { user_id, name, password }, wake: true }),
   logIn: (base: string, user_id: string, password: string) =>
-    request<AuthResult>(base, '/api/auth/login', { method: 'POST', body: { user_id, password } }),
+    request<AuthResult>(base, '/api/auth/login', { method: 'POST', body: { user_id, password }, wake: true }),
   logOut: (base: string, userToken: string) =>
     request<null>(base, '/api/auth/logout', { method: 'POST', userToken }),
   registerDevice: (base: string, userToken: string, device_id: string, user_id: string, label: string) =>

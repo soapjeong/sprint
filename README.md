@@ -50,9 +50,14 @@ firmware/test/run_tests.sh               # 펌웨어 로직 (하드웨어 불필
 cd mobile && npm run typecheck           # 앱 타입 검사
 ```
 
+## 폰에 앱 설치하기
+
+**[docs/폰에-앱-설치하기.md](docs/%ED%8F%B0%EC%97%90-%EC%95%B1-%EC%84%A4%EC%B9%98%ED%95%98%EA%B8%B0.md)** —
+무료 서버(Render + Neon) 올리기부터 APK 빌드, 안드로이드 폰 설치까지 순서대로.
+
 ## 서버를 무료로 올려두기
 
-PC 를 켜두지 않아도 앱이 돌게 하려면 `server/DEPLOY.md` 참고 —
+PC 를 켜두지 않아도 앱이 돌게 하려면 위 문서나 `server/DEPLOY.md` 참고 —
 Render(웹, 무료) + Neon(PostgreSQL, 무료·기간 제한 없음) 조합이다.
 `DATABASE_URL` 이 있으면 PostgreSQL, 없으면 로컬 SQLite 로 동작한다.
 
