@@ -46,5 +46,8 @@
     "start:dev-client": "expo start --dev-client",
     "build:dev:android": "eas build --profile development --platform android"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "react-native-worklets": "~0.10.1"
+  }
 }
