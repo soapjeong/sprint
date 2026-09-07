@@ -52,7 +52,9 @@ static const int START_BTN_PIN  = 32;   // 세션 시작 버튼 (INPUT_PULLUP, R
 static const float V_SUPPLY_MV = 3300.0f;
 static const float SERIES_R    = 10000.0f;
 static const int   ADC_SAMPLES = 16;
-#define THERMISTOR_INVERTED 0   // 온도 올렸는데 값이 내려가면 1 <-> 0 전환
+// 이 보드는 NTC 가 GND 쪽에 붙어 있어 1 로 둔다.
+// (온도를 올렸는데 표시가 내려가면 이 값을 0 <-> 1 로 뒤집으면 된다)
+#define THERMISTOR_INVERTED 1
 
 // ------- 서미스터 변환 (0=Steinhart-Hart, 1=Beta) -------
 #define USE_BETA_EQUATION 0
@@ -1089,6 +1091,7 @@ static void logCsv(unsigned long t, float skinC, float heaterC, int duty) {
 
   Serial.print("히터파워:"); Serial.print(100.0f * duty / PWM_MAX, 0); Serial.print("% | ");
   Serial.print("심박수:");   Serial.print(latestBpm, 0); Serial.print("BPM | ");
+  Serial.print("움직임:");   Serial.print(epochMotionAccum, 2); Serial.print(" | ");
   Serial.print("안정심박:"); Serial.print(isnan(g_restingBpm) ? 0.0f : g_restingBpm, 0); Serial.print("BPM | ");
   Serial.print("입면기준:"); Serial.print(isnan(g_onsetHrThreshold) ? 0.0f : g_onsetHrThreshold, 0); Serial.print("BPM | ");
 
