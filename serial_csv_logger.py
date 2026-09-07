@@ -155,6 +155,8 @@ RETRY_DELAYS = (2, 5, 15, 30)
 COMMAND_POLL_SEC = 3.0      # 앱 버튼을 얼마나 빨리 기기에 전달할지
 HEARTBEAT_SEC = 15.0        # 기기 연결 상태 보고 주기
 SILENT_LIMIT_SEC = 20.0     # 포트는 열렸는데 이 시간 동안 로그가 없으면 "응답 없음"
+WHOAMI_RETRY_SEC = 10.0     # 기기 ID 를 아직 모르면 이 주기로 다시 물어본다
+ANNOUNCE_REFRESH_SEC = 120.0  # 앱의 '기기 찾기' 목록에서 사라지지 않도록 주기적으로 다시 알린다
 class ServerUploader:
     """서버 업로드 담당.
 
@@ -389,6 +391,8 @@ class SerialCsvLogger:
         self._header_written = False
         self._stop = threading.Event()
         self.ser = None
+        self._whoami_at = 0.0
+        self._announce_at = 0.0
 
         print("[로깅 시작]")
         print(f"  센서 CSV : {self.csv_path}")
@@ -412,6 +416,9 @@ class SerialCsvLogger:
                 time.sleep(2.0)
                 self.ser.reset_input_buffer()
                 print(f"[연결됨] {self.port} @ {self.baud}bps")
+                # 기기는 부팅할 때만 @ID 를 알린다. 브리지를 나중에 켠 경우 그 줄을 놓치므로
+                # 포트를 열자마자 직접 물어본다(펌웨어의 whoami 명령).
+                self.ask_device_id()
                 return
             except serial.SerialException as exc:
                 print(f"[연결 실패] {exc}  -> 2초 후 재시도")
@@ -448,6 +455,7 @@ class SerialCsvLogger:
         if device_id and self.uploader and not self.device_id_fixed:
             if self.uploader.set_device_id(device_id):
                 print(f"[기기 인식] {device_id} — 이 ID 로 업로드합니다.")
+            self._announce_at = time.time()
             self.uploader.announce(device_id)
 
         # 이벤트 및 안내 메시지: 상태 플래그(@FLAG,...) / 세션 결과(@RESULT,...) / 안내(#, =)
@@ -510,6 +518,13 @@ class SerialCsvLogger:
             print(f"[명령 전송 실패] {text} {exc}")
             return False
 
+    def ask_device_id(self):
+        """기기에게 "너 누구냐"고 물어본다. 답(@ID,...)은 handle_line 이 받는다."""
+        if self.device_id_fixed:
+            return
+        if self.send_serial("whoami"):
+            self._whoami_at = time.time()
+
     def link_state(self):
         """앱에 보여줄 연결 상태 — 케이블 문제와 기기 전원 문제를 구분한다."""
         if self.replay:
@@ -534,6 +549,16 @@ class SerialCsvLogger:
                     command.get("command_id"), ok,
                     "시리얼 전송" if ok else "기기가 연결되어 있지 않음",
                 )
+            # 아직 기기 ID 를 모르면(부팅 알림을 놓쳤거나 기기를 나중에 꽂았으면) 다시 물어본다
+            if (self.uploader and not self.uploader.device_id
+                    and time.time() - self._whoami_at >= WHOAMI_RETRY_SEC):
+                self.ask_device_id()
+            # ID 를 알아도 주기적으로 다시 알린다 — 앱을 나중에 열어도 목록에 남아 있도록
+            elif (self.uploader and self.uploader.device_id
+                    and time.time() - self._announce_at >= ANNOUNCE_REFRESH_SEC):
+                self._announce_at = time.time()
+                self.uploader.announce(self.uploader.device_id)
+
             now = time.time()
             if now - last_beat >= HEARTBEAT_SEC:
                 last_beat = now

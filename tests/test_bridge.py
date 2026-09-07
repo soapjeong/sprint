@@ -207,3 +207,41 @@ def test_failed_command_is_reported_as_failed(tmp_path, monkeypatch):
     assert not ok
     assert [p["status"] for path, p in posts if "ack" in path] == ["failed"]
     logger.close()
+
+
+def test_bridge_asks_device_for_its_id(tmp_path):
+    """브리지를 나중에 켜면 기기의 부팅 알림(@ID)을 놓친다 — 직접 물어봐야 한다."""
+    logger = make_logger(tmp_path)
+    logger.ser = FakeSerial()
+    logger.ask_device_id()
+    assert logger.ser.written == ["whoami\n"]
+    logger.close()
+
+
+def test_answer_to_whoami_is_announced(tmp_path, monkeypatch):
+    """whoami 응답(@ID,...)을 받으면 서버에 알려 앱의 '기기 찾기' 목록에 뜨게 한다."""
+    posts = []
+    monkeypatch.setattr(bridge.ServerUploader, "_post",
+                        lambda self, path, payload: posts.append((path, payload)) or {})
+    uploader = bridge.ServerUploader("http://test", "key", "")
+    logger = make_logger(tmp_path, uploader=uploader)
+    logger.ser = FakeSerial()
+
+    logger.ask_device_id()
+    logger.handle_line("@ID,DORMX-246F28AABBCC")     # 기기의 대답
+    uploader.start()
+    uploader.close()
+
+    announces = [payload for path, payload in posts if path.endswith("/announce")]
+    assert announces and announces[0]["device_id"] == "DORMX-246F28AABBCC"
+    assert uploader.device_id == "DORMX-246F28AABBCC"
+    logger.close()
+
+
+def test_fixed_device_id_skips_whoami(tmp_path):
+    """--device 로 직접 지정했으면 기기에 물어볼 필요가 없다."""
+    logger = make_logger(tmp_path, device_id_fixed=True)
+    logger.ser = FakeSerial()
+    logger.ask_device_id()
+    assert logger.ser.written == []
+    logger.close()
