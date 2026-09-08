@@ -80,7 +80,7 @@ app.add_middleware(
 
 # 세션을 마감시키는 플래그와, 그때 기록할 결과
 TERMINAL_FLAGS = {"SLEEP_ONSET": "onset", "NO_ONSET": "no_onset"}
-CLOSING_FLAGS = {"POWER_OFF", "SESSION_DONE"}
+CLOSING_FLAGS = {"POWER_OFF", "SESSION_DONE", "SESSION_ABORTED"}
 # 펌웨어가 NO_ONSET 과 함께 보내는 원인 코드
 NO_ONSET_REASONS = {0: "unknown", 1: "hr_high", 2: "motion", 3: "sensor"}
 # 세션이 닫힌 뒤에도 이 시간(초) 안에 도착한 샘플은 그 세션에 붙인다
@@ -460,7 +460,7 @@ def user_summary(user_id: str, caller: str = Depends(current_user)) -> UserSumma
         pending = conn.execute(
             """SELECT * FROM sessions
                 WHERE user_id=? AND reviewed_at IS NULL AND ended_at IS NOT NULL
-                  AND outcome IN ('onset','no_onset')
+                  AND outcome IN ('onset','no_onset','aborted')
                 ORDER BY session_id DESC LIMIT 1""",
             (user_id,),
         ).fetchone()

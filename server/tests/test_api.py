@@ -579,3 +579,26 @@ def test_admin_csv_export(client):
     lines = csv_text.strip().splitlines()
     assert lines[0].startswith("session_id,user_id,device_id")
     assert "sub01" in lines[1] and "onset" in lines[1]
+
+
+def test_stop_closes_session_and_asks_for_review(client):
+    """앱에서 중지하면 그 사용이 바로 닫히고, 평가 대상으로 올라온다."""
+    _, device_id = register(client)
+    flag(client, device_id, "SESSION_START", [38.5, 2])
+    assert client.get(f"/api/devices/{device_id}/status", headers=auth(client)).json()["session"]
+
+    flag(client, device_id, "SESSION_ABORTED", [12.0])          # 펌웨어가 중지를 알린다
+
+    status = client.get(f"/api/devices/{device_id}/status", headers=auth(client)).json()
+    assert status["session"] is None                            # 화면에서 바로 '중지됨'
+
+    sessions = client.get("/api/users/sub01/sessions", headers=auth(client)).json()
+    assert sessions[0]["outcome"] == "aborted"                  # 기록에 남는다
+    assert sessions[0]["ended_at"]
+
+    summary = client.get("/api/users/sub01/summary", headers=auth(client)).json()
+    assert summary["pending_review"]["session_id"] == sessions[0]["session_id"]
+
+    saved = client.post(f"/api/sessions/{sessions[0]['session_id']}/review", headers=auth(client),
+                        json={"rating": 4, "note_code": "none", "note_text": ""})
+    assert saved.status_code == 200 and saved.json()["rating"] == 4

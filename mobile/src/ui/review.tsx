@@ -35,6 +35,7 @@ function StarRow({ value, onChange }: { value: number; onChange: (v: number) => 
  */
 export function SleepReviewPopup({
   visible,
+  heading = '어젯밤은 잘 주무셨나요?',
   dateLabel,
   solMin,
   onSubmit,
@@ -42,6 +43,8 @@ export function SleepReviewPopup({
   error,
 }: {
   visible: boolean;
+  /** 기본은 아침에 묻는 문구. 방금 중지한 사용이면 호출 쪽에서 바꿔 넣는다. */
+  heading?: string;
   dateLabel: string;
   solMin: number | null;
   onSubmit: (rating: number, note: NoteCode, text: string) => void;
@@ -77,7 +80,7 @@ export function SleepReviewPopup({
             shadow.card,
           ]}>
           <View style={{ alignItems: 'center', gap: 4 }}>
-            <Heading>어젯밤은 잘 주무셨나요?</Heading>
+            <Heading>{heading}</Heading>
             <Caption>
               {solMin !== null ? `${dateLabel} · ${solMin.toFixed(0)}분 만에 잠들었어요` : dateLabel}
             </Caption>

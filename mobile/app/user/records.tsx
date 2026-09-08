@@ -44,7 +44,7 @@ export default function RecordsScreen() {
   /** 날짜별로 그날의 기록을 모아둔다 */
   const byDay = useMemo(() => {
     const map = new Map<string, Session[]>();
-    (sessions ?? []).forEach((s) => {
+    (sessions ?? []).filter((s) => s.outcome !== 'running').forEach((s) => {
       const key = ymd(s.started_at);
       map.set(key, [...(map.get(key) ?? []), s]);
     });
@@ -177,6 +177,7 @@ export default function RecordsScreen() {
             {pickedSessions.map((s) => {
               const note = NOTE_OPTIONS.find((o) => o.code === s.note_code);
               const ok = s.outcome === 'onset';
+              const stopped = s.outcome === 'aborted';
               return (
                 <View
                   key={s.session_id}
@@ -188,9 +189,15 @@ export default function RecordsScreen() {
                   }}>
                   {/* 1) 입면 성공 여부 */}
                   <Row style={{ alignItems: 'center', gap: 8 }}>
-                    <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: ok ? theme.mint : theme.amber }} />
+                    <View
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: 5,
+                        backgroundColor: ok ? theme.mint : stopped ? theme.textMuted : theme.amber,
+                      }} />
                     <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '700' }}>
-                      {ok ? '입면 성공' : '입면 실패'}
+                      {ok ? '입면 성공' : stopped ? '사용 중지' : '입면 실패'}
                     </Text>
                   </Row>
 

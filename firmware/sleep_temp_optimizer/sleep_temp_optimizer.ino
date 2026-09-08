@@ -1274,6 +1274,9 @@ static void handleSerial(float skinC, float heaterC) {
       } else if (strcmp(buf,"start") == 0) {
         startSession(START_TRIGGER_APP);
       } else if (strcmp(buf,"abort") == 0) {
+        // 앱(또는 사람)이 중지한 것도 서버에 알려야 화면과 기록이 바로 정리된다
+        bool wasRunning = (sessionState != SESS_IDLE && sessionState != SESS_OFF);
+        float usedMin = wasRunning ? (millis() - sessionStartMs) / 60000.0f : 0.0f;
         pwmWrite(0);
         SETPOINT_C = 0;
         sessionState = SESS_IDLE;
@@ -1284,6 +1287,7 @@ static void handleSerial(float skinC, float heaterC) {
         // FAULT 상태에서는 온도를 계속 감시해야 하므로 센서를 끄지 않는다
         if (safetyState == STATE_NORMAL) setSensorsActive(false);
         Serial.println("# SESSION aborted");
+        if (wasRunning) sendServerFlag("SESSION_ABORTED", usedMin, 0);
       } else if (strncmp(buf,"set ",4) == 0) {
         sessionTemp = clampSearch(atof(buf+4));
         manualTempSet = true;

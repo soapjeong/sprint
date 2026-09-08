@@ -42,6 +42,9 @@ export default function HomeScreen() {
   const [reviewError, setReviewError] = useState('');
 
   const spokenFor = useRef<number | null>(null);   // 기기 사용 한 번당 안내 음성은 한 번만
+  const stoppedId = useRef<number | null>(null);   // 내가 방금 중지한 기기 사용 (바로 평가받는다)
+  const [stopping, setStopping] = useState(false); // 중지 명령을 보내고 기기가 멈추기까지
+  const stoppingRef = useRef(false);               // load() 안에서 최신값을 보기 위한 사본
   const token = settings.userToken ?? '';
   const deviceId = settings.deviceId;
 
@@ -74,6 +77,11 @@ export default function HomeScreen() {
       if (deviceId) {
         const st = await api.deviceStatus(settings.serverUrl, token, deviceId);
         setStatus(st);
+        if (stoppingRef.current && !st.session) {   // 기기가 실제로 멈춘 순간
+          stoppingRef.current = false;
+          setStopping(false);
+          setNotice('기기 사용을 중지했어요. 기록에 담았어요.');
+        }
         // 워밍업이 끝나 센서값이 정상으로 들어오는 순간 = 음성 안내 시점
         if (st.session && st.warmup_done && spokenFor.current !== st.session.session_id) {
           spokenFor.current = st.session.session_id;
@@ -108,9 +116,10 @@ export default function HomeScreen() {
     }, [load]),
   );
 
-  // 입면이 확정된 기기 사용만 평가를 물어본다
+  // 아침 팝업은 입면이 확정된 사용만. 다만 내가 방금 중지한 사용은 바로 물어본다.
   const pending = summary?.pending_review ?? null;
-  const askReview = pending !== null && pending.outcome === 'onset';
+  const justStopped = pending !== null && pending.session_id === stoppedId.current;
+  const askReview = pending !== null && (pending.outcome === 'onset' || justStopped);
   useEffect(() => {
     setReviewOpen(askReview);
   }, [askReview]);
@@ -148,8 +157,13 @@ export default function HomeScreen() {
     setNotice('');
     try {
       const running = !!status?.session;
+      if (running) {
+        stoppedId.current = status?.session?.session_id ?? null;   // 이 사용은 바로 평가받는다
+        stoppingRef.current = true;
+        setStopping(true);
+      }
       await api.sendCommand(settings.serverUrl, token, deviceId, running ? 'abort' : 'start');
-      setNotice(running ? '기기에 중지를 전달했어요.' : '기기에 시작을 전달했어요. 센서를 확인하는 중이에요…');
+      setNotice(running ? '중지하는 중이에요…' : '기기에 시작을 전달했어요. 센서를 확인하는 중이에요…');
       if (!running) spokenFor.current = null;
       load();
     } catch (e) {
@@ -165,6 +179,7 @@ export default function HomeScreen() {
     setReviewing(true);
     try {
       await api.reviewSession(settings.serverUrl, token, pending.session_id, rating, note, text);
+      if (stoppedId.current === pending.session_id) stoppedId.current = null;
       setReviewOpen(false);
       load();
     } catch (e) {
@@ -239,7 +254,7 @@ export default function HomeScreen() {
               ]}>
               <PowerIcon size={54} color={running ? theme.onAccent : theme.textPrimary} />
             </View>
-            <Heading>{running ? '누르면 중지돼요' : '눌러서 작동 시작'}</Heading>
+            <Heading>{stopping ? '중지하는 중이에요' : running ? '누르면 중지돼요' : '눌러서 작동 시작'}</Heading>
           </Pressable>
 
           {/* 요구: start 버튼 옆 기기 연결 상태 (색으로 구분) */}
@@ -354,8 +369,9 @@ export default function HomeScreen() {
       {/* 입면이 확정된 밤에만 뜨는 평가 팝업 */}
       <SleepReviewPopup
         visible={reviewOpen}
+        heading={justStopped && pending?.outcome !== 'onset' ? '방금 사용은 어떠셨나요?' : undefined}
         dateLabel={pending ? formatKoreanDate(new Date(pending.started_at)) : ''}
-        solMin={pending?.sol_min ?? null}
+        solMin={pending?.outcome === 'onset' ? pending.sol_min : null}
         onSubmit={submitReview}
         submitting={reviewing}
         error={reviewError}
