@@ -602,3 +602,19 @@ def test_stop_closes_session_and_asks_for_review(client):
     saved = client.post(f"/api/sessions/{sessions[0]['session_id']}/review", headers=auth(client),
                         json={"rating": 4, "note_code": "none", "note_text": ""})
     assert saved.status_code == 200 and saved.json()["rating"] == 4
+
+
+def test_abort_ack_alone_closes_the_session(client):
+    """기기가 중지를 알리지 않아도, 명령이 전달된 것으로 사용을 닫는다."""
+    _, device_id = register(client)
+    flag(client, device_id, "SESSION_START", [38.5, 2])
+
+    queued = client.post(f"/api/devices/{device_id}/commands", headers=auth(client),
+                         json={"command": "abort"}).json()
+    client.get(f"/api/ingest/commands?device_id={device_id}", headers=INGEST)   # 브리지가 가져감
+    client.post(f"/api/ingest/commands/{queued['command_id']}/ack", headers=INGEST,
+                json={"status": "done", "detail": "시리얼 전송"})
+
+    status = client.get(f"/api/devices/{device_id}/status", headers=auth(client)).json()
+    assert status["session"] is None
+    assert client.get("/api/users/sub01/sessions", headers=auth(client)).json()[0]["outcome"] == "aborted"

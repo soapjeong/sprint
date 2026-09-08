@@ -599,10 +599,23 @@ def ack_command(command_id: int, payload: CommandAck) -> CommandOut:
         ).fetchone()
         if row is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "명령을 찾을 수 없습니다.")
+        now = db.now_iso()
         conn.execute(
             "UPDATE device_commands SET status=?, acked_at=?, detail=? WHERE command_id=?",
-            (payload.status, db.now_iso(), payload.detail, command_id),
+            (payload.status, now, payload.detail, command_id),
         )
+        # 중지 명령이 기기에 전달됐으면 그것으로 이 사용은 끝난 것으로 본다.
+        # 기기가 보내는 SESSION_ABORTED 를 기다리지 않아도 앱 화면과 기록이 바로 정리된다
+        # (예전 펌웨어처럼 중지를 알리지 않는 기기에서도 멈춘 것으로 보인다).
+        if row["command"] == "abort" and payload.status == "done":
+            session = _open_session(conn, str(row["device_id"]))
+            if session is not None:
+                conn.execute(
+                    "UPDATE sessions SET ended_at=?,"
+                    " outcome=CASE outcome WHEN 'running' THEN 'aborted' ELSE outcome END"
+                    " WHERE session_id=?",
+                    (now, session["session_id"]),
+                )
         updated = conn.execute(
             "SELECT * FROM device_commands WHERE command_id=?", (command_id,)
         ).fetchone()
