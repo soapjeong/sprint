@@ -47,6 +47,7 @@ void SerialClass::println() { if (g_verbose) printf("\n"); }
 
 TwoWire Wire;
 void TwoWire::begin() {}
+void TwoWire::begin(int, int) {}
 void TwoWire::setClock(uint32_t) {}
 
 bool Preferences::begin(const char*, bool) { return true; }
@@ -85,3 +86,4 @@ void esp_deep_sleep_start() { g_deepSleepCalled = true; }
 int rtc_gpio_pullup_en(gpio_num_t) { return 0; }
 int rtc_gpio_pulldown_dis(gpio_num_t) { return 0; }
 int rtc_gpio_deinit(gpio_num_t) { return 0; }
+bool rtc_gpio_is_valid_gpio(gpio_num_t pin) { return pin <= 39; }

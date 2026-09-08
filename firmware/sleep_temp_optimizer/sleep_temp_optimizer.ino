@@ -44,9 +44,24 @@
 // ===========================================================================
 // 핀 / 하드웨어 설정
 // ===========================================================================
+// ---- 보드별 기본 핀 ----
+// 배선을 바꿨다면 이 숫자만 고치면 된다. 보드가 바뀌면 쓸 수 있는 핀도 달라진다.
+//  * ESP32-S3 : GPIO 26~37 은 내장 플래시/PSRAM 이 쓰고 있어 건드리면 부팅이 안 된다.
+//               ADC1 은 GPIO 1~10, 딥슬립 기상(ext0)에 쓸 RTC GPIO 는 0~21 뿐이다.
+//  * ESP32    : 기존 배치(26 / 34 / 32) 그대로.
+#if CONFIG_IDF_TARGET_ESP32S3
+static const int HEATER_PWM_PIN = 5;    // MOSFET(IRLML2502) 게이트
+static const int NTC_PIN        = 4;    // NTC 서미스터(히터 표면) — ADC1
+static const int START_BTN_PIN  = 6;    // 세션 시작 버튼 (INPUT_PULLUP, RTC GPIO)
+static const int I2C_SDA_PIN    = 8;    // MLX90614 / MPU6050 / MAX30102 공용
+static const int I2C_SCL_PIN    = 9;
+#else
 static const int HEATER_PWM_PIN = 26;   // MOSFET(IRLML2502) 게이트
 static const int NTC_PIN        = 34;   // NTC 서미스터(히터 표면) 아날로그 핀
 static const int START_BTN_PIN  = 32;   // 세션 시작 버튼 (INPUT_PULLUP, RTC GPIO)
+static const int I2C_SDA_PIN    = 21;   // MLX90614 / MPU6050 / MAX30102 공용
+static const int I2C_SCL_PIN    = 22;
+#endif
 
 // ------- NTC 전압 분배기 / ADC (히터 표면 온도, 안전감시 전용) -------
 static const float V_SUPPLY_MV = 3300.0f;
@@ -1020,6 +1035,12 @@ static void shutdownDevice(const char* reason) {
   delay(200);
 
 #if POWER_OFF_USE_DEEP_SLEEP
+  if (!rtc_gpio_is_valid_gpio((gpio_num_t)START_BTN_PIN)) {
+    // 이 보드에서는 버튼 핀으로 딥슬립에서 깨울 수 없다. 잠들면 다시 못 켜지므로
+    // 히터/센서만 끈 채(SESS_OFF) 대기한다 — 앱의 start 명령으로 다시 시작할 수 있다.
+    Serial.println("# 버튼 핀이 RTC GPIO 가 아니라 딥슬립을 건너뜁니다(대기 상태 유지).");
+    return;
+  }
   rtc_gpio_pullup_en((gpio_num_t)START_BTN_PIN);
   rtc_gpio_pulldown_dis((gpio_num_t)START_BTN_PIN);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)START_BTN_PIN, 0);  // 버튼 누름(LOW) 시 기상
@@ -1201,10 +1222,11 @@ void setup() {
   SETPOINT_C = 0;
   analogReadResolution(12);
   analogSetPinAttenuation(NTC_PIN, ADC_11db);
-  rtc_gpio_deinit((gpio_num_t)START_BTN_PIN);   // 딥슬립에서 깬 뒤 일반 GPIO로 복귀
+  if (rtc_gpio_is_valid_gpio((gpio_num_t)START_BTN_PIN))
+    rtc_gpio_deinit((gpio_num_t)START_BTN_PIN); // 딥슬립에서 깬 뒤 일반 GPIO로 복귀
   pinMode(START_BTN_PIN, INPUT_PULLUP);
 
-  Wire.begin();   // SDA=21, SCL=22 (기본)
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
 
   g_mpuOk = mpu.begin();
   if (g_mpuOk) mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
