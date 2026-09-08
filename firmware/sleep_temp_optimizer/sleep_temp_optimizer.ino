@@ -44,24 +44,46 @@
 // ===========================================================================
 // 핀 / 하드웨어 설정
 // ===========================================================================
-// ---- 보드별 기본 핀 ----
-// 배선을 바꿨다면 이 숫자만 고치면 된다. 보드가 바뀌면 쓸 수 있는 핀도 달라진다.
-//  * ESP32-S3 : GPIO 26~37 은 내장 플래시/PSRAM 이 쓰고 있어 건드리면 부팅이 안 된다.
-//               ADC1 은 GPIO 1~10, 딥슬립 기상(ext0)에 쓸 RTC GPIO 는 0~21 뿐이다.
-//  * ESP32    : 기존 배치(26 / 34 / 32) 그대로.
-#if CONFIG_IDF_TARGET_ESP32S3
-static const int HEATER_PWM_PIN = 5;    // MOSFET(IRLML2502) 게이트
-static const int NTC_PIN        = 4;    // NTC 서미스터(히터 표면) — ADC1
-static const int START_BTN_PIN  = 6;    // 세션 시작 버튼 (INPUT_PULLUP, RTC GPIO)
-static const int I2C_SDA_PIN    = 8;    // MLX90614 / MPU6050 / MAX30102 공용
-static const int I2C_SCL_PIN    = 9;
-#else
-static const int HEATER_PWM_PIN = 26;   // MOSFET(IRLML2502) 게이트
-static const int NTC_PIN        = 34;   // NTC 서미스터(히터 표면) 아날로그 핀
-static const int START_BTN_PIN  = 32;   // 세션 시작 버튼 (INPUT_PULLUP, RTC GPIO)
-static const int I2C_SDA_PIN    = 21;   // MLX90614 / MPU6050 / MAX30102 공용
-static const int I2C_SCL_PIN    = 22;
-#endif
+// ---------------------------------------------------------------------------
+// XIAO ESP32-S3 캐리어 보드 (40x50mm, rev.A) 핀 배치
+//   실크 D0~D10 이 아니라 GPIO 번호를 그대로 쓴다.
+//   D0=GPIO1  D1=GPIO2  D2=GPIO3  D3=GPIO4  D4=GPIO5  D5=GPIO6
+//   D7=GPIO44 D8=GPIO7  D9=GPIO8  D10=GPIO9
+// ---------------------------------------------------------------------------
+static const int HEATER_PWM_PIN = 4;    // D3  : MOSFET(IRLML2502) 게이트 -> R1 -> Q1.G
+static const int NTC_PIN        = 1;    // D0  : NTC 분압 노드 (R10+C7 RC 필터 경유)
+static const int I2C_SDA_PIN    = 5;    // D4  : MAX30102 / MLX90614 / MPU-6050 공용
+static const int I2C_SCL_PIN    = 6;    // D5
+static const int MAX_INT_PIN    = 7;    // D8  : MAX30102 INT (현재 미사용, 입력으로만 둠)
+static const int MPU_INT_PIN    = 3;    // D2  : MPU-6050 INT (현재 미사용)
+static const int BAT_SENSE_PIN  = 2;    // D1  : 배터리 전압 분압 (R3/R4 = 100k/100k)
+static const int CHG_STAT1_PIN  = 8;    // D9  : MCP73871 STAT1 (open-drain, active low)
+static const int CHG_STAT2_PIN  = 9;    // D10 : MCP73871 STAT2
+
+// 이 보드에는 전용 start 버튼 자리가 없어 XIAO 모듈의 BOOT 버튼(GPIO0)을 쓴다.
+// 동작 중에 짧게 누르면 세션이 시작된다(앱의 시작 버튼과 같은 역할).
+//
+// 다만 GPIO0 은 부팅 모드를 정하는 스트래핑 핀이라, 칩이 리셋·기상하는 순간에
+// 눌려 있으면 프로그램 대신 다운로드 모드로 들어간다. 그래서 이 핀으로는
+// 딥슬립에서 깨우지 않는다(아래 POWER_OFF_USE_DEEP_SLEEP 설명 참고).
+static const int START_BTN_PIN  = 0;
+#define HAS_START_BUTTON 1
+#define START_BTN_IS_STRAPPING_PIN (START_BTN_PIN == 0)
+
+// ---------------------------------------------------------------------------
+// MLX90614(피부 온도) 장착 여부
+//   1 = 장착. 피부 온도로 PID 제어하고 NTC 는 히터 과열 감시 전용(이중 감시).
+//   0 = 미장착. 히터 표면(NTC) 하나로 제어와 안전 감시를 겸한다.
+//       센서가 하나뿐이라 고장 시 대비책이 없으므로 상한을 낮춰 잡는다.
+//       이 상태에서는 히터를 켠 채 자리를 비우지 말 것.
+// ---------------------------------------------------------------------------
+#define HAS_MLX90614 0
+
+// 배터리 전압 감시. J1(USB-C) 경로를 쓰지 않고 XIAO USB 로만 구동 중이면
+// BAT_SENSE 에 유효한 전압이 오지 않으므로 0 으로 둔다.
+#define USE_BATTERY_MONITOR 0
+static const float BAT_DIVIDER_RATIO = 2.0f;    // (R3+R4)/R4
+static const float BAT_LOW_CUTOFF_V  = 3.40f;   // 이 아래에서는 히터 금지
 
 // ------- NTC 전압 분배기 / ADC (히터 표면 온도, 안전감시 전용) -------
 static const float V_SUPPLY_MV = 3300.0f;
@@ -72,11 +94,11 @@ static const int   ADC_SAMPLES = 16;
 #define THERMISTOR_INVERTED 1
 
 // ------- 서미스터 변환 (0=Steinhart-Hart, 1=Beta) -------
-#define USE_BETA_EQUATION 0
+#define USE_BETA_EQUATION 1   // MF52D 10K B3435 는 Beta 식이 더 정확하다
 static const double SH_A = 1.009249522e-03;
 static const double SH_B = 2.378405444e-04;
 static const double SH_C = 2.019202697e-07;
-static const float  BETA        = 3950.0f;
+static const float  BETA        = 3435.0f;   // MF52D 10K B3435
 static const float  R0_NOMINAL  = 10000.0f;
 static const float  T0_KELVIN   = 298.15f;
 static const float  T_SENSE_MIN_C = -40.0f;
@@ -87,7 +109,7 @@ static float Kp = 10.0f, Ki = 0.5f, Kd = 2.0f;
 static const float INTEGRAL_WINDUP_LIMIT = 50.0f;
 
 // ------- PWM (ESP32 Core v3.x, ledcAttach 기반) -------
-static const int PWM_FREQ_HZ  = 5000;
+static const int PWM_FREQ_HZ  = 1000;   // 히터선이 I2C 옆을 지나므로 낮게 잡는다
 static const int PWM_RES_BITS = 8;                    // 0~255
 static const int PWM_MAX      = (1 << PWM_RES_BITS) - 1;
 
@@ -98,11 +120,25 @@ static const unsigned long LOG_PERIOD_MS     = 1000;
 // ===========================================================================
 // 안전(Watchdog) — 히터(NTC) / 피부(MLX) 이중 감시
 // ===========================================================================
-static const float SKIN_HARD_LIMIT_C   = 42.0f;  // 피부 표면 절대 상한
-static const float HEATER_HARD_LIMIT_C = 45.0f;  // 히터 필름 절대 상한
+#if HAS_MLX90614
+static const float SKIN_HARD_LIMIT_C   = 42.0f;  // 피부 표면 절대 상한 (MLX90614)
+static const float HEATER_HARD_LIMIT_C = 45.0f;  // 히터 필름 절대 상한 (NTC)
+#else
+// MLX 미장착: NTC 하나로 두 역할을 겸한다. 히터 필름이 곧 피부 접촉면이므로
+// 둘 다 피부 기준(43도)으로 낮춰 잡는다.
+static const float SKIN_HARD_LIMIT_C   = 43.0f;
+static const float HEATER_HARD_LIMIT_C = 43.0f;
+#endif
 static const float SPIKE_JUMP_C        = 2.0f;   // 1제어주기(1초) 내 급상승 한계
 static const float SKIN_REARM_C        = 39.0f;  // 재가동 허용 온도(피부)
 static const float HEATER_REARM_C      = 42.0f;  // 재가동 허용 온도(히터)
+
+// 센서 이탈(폭주) 감시 — 히터를 최대로 밀고 있는데 온도가 안 오르면 서미스터가
+// 필름에서 떨어졌다는 뜻이다. 이 경우 온도는 "정상 범위"로 보이므로 상한 감시로는
+// 못 잡는다. 센서 하나로 제어와 감시를 겸하는 구성에서는 이 감시가 특히 중요하다.
+static const int           RUNAWAY_DUTY_PCT   = 95;      // 이 출력 이상으로
+static const unsigned long RUNAWAY_WINDOW_MS  = 180000UL; // 이 시간(3분) 계속 밀었는데
+static const float         RUNAWAY_MIN_RISE_C = 1.0f;    // 온도가 이만큼도 안 오르면 이상
 
 // [변경 3] 이상 온도가 이 시간 이상 "연속" 유지될 때만 FAULT 래치
 static const unsigned long FAULT_PERSIST_MS = 5000UL;
@@ -164,7 +200,16 @@ static const int   MIN_HR_SAMPLES_PER_EPOCH = 10;       // 에폭이 유효하�
 static const float HR_ABOVE_RATIO_MAX       = 0.25f;    // 기준 초과 샘플 비율 허용치
 
 // 전원 차단 방식: 1 = 딥슬립(버튼으로 재기동), 0 = 히터/센서만 끄고 SESS_OFF 유지
+//
+// 이 보드는 시작 버튼이 GPIO0(스트래핑 핀)뿐이라 딥슬립 기상에 쓸 수 없다.
+// 그래서 딥슬립 대신 "히터와 모든 센서를 끈 채 대기(SESS_OFF)"로 간다.
+// 안전상 중요한 부분(히터·센서 정지)은 동일하고, USB 로 붙어 있는 동안에는
+// 앱의 시작 버튼으로 바로 다음 세션을 시작할 수 있다.
+#if START_BTN_IS_STRAPPING_PIN
+#define POWER_OFF_USE_DEEP_SLEEP 0
+#else
 #define POWER_OFF_USE_DEEP_SLEEP 1
+#endif
 
 // MLX90614 라이브러리에 enterSleepMode() 가 있는 버전이면 1 로 두면 절전까지 수행한다.
 // (0 이어도 읽기를 멈추므로 측정은 정지된다)
@@ -176,7 +221,11 @@ static const float HR_ABOVE_RATIO_MAX       = 0.25f;    // 기준 초과 샘플 
 static const int   MAX_BINS     = 16;
 static const float SEARCH_START = 39.0f;   // 첫 세션 온도
 static const float SEARCH_MIN   = 37.5f;
+#if HAS_MLX90614
 static const float SEARCH_MAX   = 40.5f;   // SKIN_HARD_LIMIT(42) 대비 여유 확보
+#else
+static const float SEARCH_MAX   = 40.0f;   // 단일 센서 구성이므로 한 단계 더 보수적으로
+#endif
 static const float SEARCH_STEP0 = 1.0f;
 static const float SEARCH_TOL   = 0.3f;
 static const float BIN_WIDTH    = 0.5f;
@@ -191,11 +240,14 @@ struct SearchResult { float nextTemp; bool converged; float bestTemp; float best
 static float heaterVoltageToResistance(float vNodeMv);
 static float heaterResistanceToTempC(float rOhm);
 static float readHeaterTempC();
+static float readBatteryV();
+static bool  batteryOkForHeater();
 
 static SafetyState classifyAbnormal(float skinC, float heaterC, float lastSkinC, float lastHeaterC);
 static SafetyState evaluateSafety(float skinC, float heaterC, float lastSkinC, float lastHeaterC,
                                   SafetyState current, unsigned long now);
 static void  clearFaultPending();
+static void  checkHeaterRunaway(float ctrlC, int duty, unsigned long now);
 static const char* stateName(SafetyState s);
 static const char* sessName(SessionState s);
 
@@ -266,6 +318,9 @@ static float lastLoggedSkinC = NAN, lastLoggedHeaterC = NAN;
 static SafetyState   pendingFault    = STATE_NORMAL;
 static unsigned long pendingFaultMs  = 0;
 static bool  g_preFaultCutoff = false;   // FAULT 확정 전이라도 히터를 끄는 예방 차단
+static bool          g_runawaySuspected = false;  // 센서가 필름에서 떨어진 것으로 보임
+static unsigned long runawayStartMs     = 0;      // 최대 출력이 시작된 시각
+static float         runawayRefC        = NAN;    // 그때의 제어 온도
 static float spikeRefSkinC   = NAN;      // 스파이크 감지 시점의 온도(해소 판단용)
 static float spikeRefHeaterC = NAN;
 
@@ -408,12 +463,38 @@ static float readHeaterTempC() {
   return heaterResistanceToTempC(heaterVoltageToResistance(mv));
 }
 
+// ---- 배터리 전압 (R3/R4 100k:100k 분압, D1/GPIO2) ----
+static float readBatteryV() {
+#if USE_BATTERY_MONITOR
+  uint32_t acc = 0;
+  for (int i = 0; i < ADC_SAMPLES; i++) acc += analogReadMilliVolts(BAT_SENSE_PIN);
+  return ((float)acc / ADC_SAMPLES) * BAT_DIVIDER_RATIO / 1000.0f;
+#else
+  return NAN;
+#endif
+}
+
+// 히터는 배터리를 가장 많이 먹는다. 저전압에서는 아예 켜지 않는다.
+static bool batteryOkForHeater() {
+#if USE_BATTERY_MONITOR
+  float v = readBatteryV();
+  if (isnan(v)) return true;          // 측정 불가 시 막지 않는다(USB 구동 등)
+  if (v < 1.0f) return true;          // 분압 미연결로 보고 통과
+  return v >= BAT_LOW_CUTOFF_V;
+#else
+  return true;
+#endif
+}
+
 // ===========================================================================
 // ---- 안전 평가 (히터 NTC + 피부 MLX 이중 감시, 5초 지속 시 래치) ----
 // ===========================================================================
 
 // 순간값 기준으로 "지금 이상 상태인가"만 판정 (래치/지속시간 판단은 상위에서)
 static SafetyState classifyAbnormal(float skinC, float heaterC, float lastSkinC, float lastHeaterC) {
+  // 센서가 떨어져 히터 온도를 못 읽는 상태(값 자체는 정상 범위로 보인다)
+  if (g_runawaySuspected) return STATE_FAULT_SENSOR;
+
   // 센서 이상(범위 초과/NaN)
   if (isnan(skinC)   || skinC   < T_SENSE_MIN_C || skinC   > T_SENSE_MAX_C) return STATE_FAULT_SENSOR;
   if (isnan(heaterC) || heaterC < T_SENSE_MIN_C || heaterC > T_SENSE_MAX_C) return STATE_FAULT_SENSOR;
@@ -451,6 +532,36 @@ static void clearFaultPending() {
 }
 
 // [변경 3] 이상 상태가 FAULT_PERSIST_MS(5초) 이상 연속될 때만 FAULT 확정(래치)
+/**
+ * 히터를 거의 최대로 밀고 있는데도 온도가 오르지 않으면 서미스터가 히터에서
+ * 떨어졌다고 본다. 출력이 내려가거나 온도가 충분히 오르면 감시를 다시 시작한다.
+ */
+static void checkHeaterRunaway(float ctrlC, int duty, unsigned long now) {
+  bool pushingHard = (duty * 100 >= PWM_MAX * RUNAWAY_DUTY_PCT);
+  if (!pushingHard || isnan(ctrlC)) {           // 최대 출력이 아니면 감시 창을 닫는다
+    runawayStartMs = 0;
+    runawayRefC = NAN;
+    return;
+  }
+  if (runawayStartMs == 0) {                    // 최대 출력이 시작된 시점을 기준으로 잡는다
+    runawayStartMs = now;
+    runawayRefC = ctrlC;
+    return;
+  }
+  if (ctrlC - runawayRefC >= RUNAWAY_MIN_RISE_C) {   // 잘 오르고 있으면 정상
+    runawayStartMs = now;
+    runawayRefC = ctrlC;
+    return;
+  }
+  if (now - runawayStartMs >= RUNAWAY_WINDOW_MS) {
+    if (!g_runawaySuspected) {
+      Serial.println("# [경고] 최대 출력인데 온도가 오르지 않습니다 — 센서가 히터에서 "
+                     "떨어졌을 수 있어 가열을 차단합니다.");
+    }
+    g_runawaySuspected = true;
+  }
+}
+
 static SafetyState evaluateSafety(float skinC, float heaterC, float lastSkinC, float lastHeaterC,
                                   SafetyState current, unsigned long now) {
   // 이미 래치된 FAULT는 재가동(REARM) 조건 전까지 유지
@@ -918,6 +1029,10 @@ static void startSession(uint8_t trigger) {
   isAsleepConfirmed = false;
   epochsBlockedHr = epochsBlockedMotion = epochsBlockedSensor = 0;
 
+  g_runawaySuspected = false;    // 새 세션에서는 폭주 감시를 처음부터 다시 본다
+  runawayStartMs = 0;
+  runawayRefC = NAN;
+
   calibState    = CAL_NONE;      // 워밍업이 끝나면 CAL_COLLECT 로 전환
   calibPhaseMs  = sessionStartMs;
   calibBpmSum   = 0;
@@ -1035,12 +1150,6 @@ static void shutdownDevice(const char* reason) {
   delay(200);
 
 #if POWER_OFF_USE_DEEP_SLEEP
-  if (!rtc_gpio_is_valid_gpio((gpio_num_t)START_BTN_PIN)) {
-    // 이 보드에서는 버튼 핀으로 딥슬립에서 깨울 수 없다. 잠들면 다시 못 켜지므로
-    // 히터/센서만 끈 채(SESS_OFF) 대기한다 — 앱의 start 명령으로 다시 시작할 수 있다.
-    Serial.println("# 버튼 핀이 RTC GPIO 가 아니라 딥슬립을 건너뜁니다(대기 상태 유지).");
-    return;
-  }
   rtc_gpio_pullup_en((gpio_num_t)START_BTN_PIN);
   rtc_gpio_pulldown_dis((gpio_num_t)START_BTN_PIN);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)START_BTN_PIN, 0);  // 버튼 누름(LOW) 시 기상
@@ -1222,18 +1331,28 @@ void setup() {
   SETPOINT_C = 0;
   analogReadResolution(12);
   analogSetPinAttenuation(NTC_PIN, ADC_11db);
-  if (rtc_gpio_is_valid_gpio((gpio_num_t)START_BTN_PIN))
-    rtc_gpio_deinit((gpio_num_t)START_BTN_PIN); // 딥슬립에서 깬 뒤 일반 GPIO로 복귀
+  analogSetPinAttenuation(BAT_SENSE_PIN, ADC_11db);
+  pinMode(MAX_INT_PIN, INPUT);
+  pinMode(MPU_INT_PIN, INPUT);
+  pinMode(CHG_STAT1_PIN, INPUT_PULLUP);
+  pinMode(CHG_STAT2_PIN, INPUT_PULLUP);
+  rtc_gpio_deinit((gpio_num_t)START_BTN_PIN);   // 딥슬립에서 깬 뒤 일반 GPIO로 복귀
   pinMode(START_BTN_PIN, INPUT_PULLUP);
 
-  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);   // D4=GPIO5(SDA), D5=GPIO6(SCL)
+  Wire.setClock(100000);                  // 손바닥까지 20cm 배선 -> 100kHz
 
   g_mpuOk = mpu.begin();
   if (g_mpuOk) mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
   Serial.println(g_mpuOk ? "# MPU6050 OK" : "# MPU6050 NOT found");
 
+#if HAS_MLX90614
   g_mlxOk = mlx.begin();
   Serial.println(g_mlxOk ? "# MLX90614 OK" : "# MLX90614 NOT found");
+#else
+  g_mlxOk = false;
+  Serial.println("# MLX90614 미장착 구성 - NTC 단일 센서로 제어/감시합니다");
+#endif
 
   // MAX30102 초기화 (이때 I2C 통신 속도가 400kHz로 빨라짐)
   g_maxOk = particleSensor.begin(Wire, I2C_SPEED_FAST);
@@ -1318,7 +1437,11 @@ void loop() {
     //          워밍업(SESS_WARMUP) 중에는 읽기만 하고 안전 판정/PID 에는 쓰지 않는다.
     bool accepted = sensorDataAccepted();
     float heaterC = readHeaterTempC();                                        // NTC: 히터 표면(안전감시용)
-    float skinC   = (g_tempSensorsActive && g_mlxOk) ? mlx.readObjectTempC() : NAN; // MLX90614: 피부(제어 목표)
+#if HAS_MLX90614
+    float skinC   = (g_tempSensorsActive && g_mlxOk) ? mlx.readObjectTempC() : NAN;
+#else
+    float skinC   = heaterC;   // MLX 미장착: 히터 표면 온도를 제어 입력으로 겸용
+#endif
 
     if (accepted) {
       safetyState = evaluateSafety(skinC, heaterC, lastLoggedSkinC, lastLoggedHeaterC, safetyState, now);
@@ -1334,6 +1457,7 @@ void loop() {
                        && (safetyState == STATE_NORMAL)
                        && !g_preFaultCutoff                // 이상 온도 감시 중에는 가열 정지
                        && (sessionState == SESS_RUNNING || sessionState == SESS_COOLDOWN)
+                       && batteryOkForHeater()             // 저전압에서는 가열 금지
                        && (SETPOINT_C > 0);
     if (heaterAllowed) {
       float out = computePID(SETPOINT_C, skinC, CONTROL_PERIOD_MS/1000.0f);
@@ -1344,6 +1468,7 @@ void loop() {
     }
     if (safetyState != STATE_NORMAL || g_preFaultCutoff) duty = 0;  // ★ 하드 컷오프 강제 ★
     pwmWrite(duty);
+    if (accepted) checkHeaterRunaway(skinC, duty, now);   // 센서 이탈(폭주) 감시
 
     if (accepted) {                 // 워밍업/정지 구간의 값은 다음 주기 비교에 쓰지 않는다
       lastLoggedSkinC   = skinC;

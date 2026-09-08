@@ -15,6 +15,8 @@ import { SleepReviewPopup } from '@/ui/review';
 import { formatClock, formatKoreanDate, formatMinutes, formatTemp } from '@/util/format';
 
 const POLL_MS = 5000;
+/** 이 시간 안에 신호를 보낸 기기만 '지금 PC 에 연결된 기기'로 본다 */
+const ADOPT_WINDOW_MIN = 10;
 const TTS_LINE = '연결이 확인되었습니다. 수면케어를 시작합니다.';
 
 export default function HomeScreen() {
@@ -54,6 +56,19 @@ export default function HomeScreen() {
       if (!deviceId && next.devices.length > 0) {
         await update({ deviceId: next.devices[0].device_id });
         return;
+      }
+
+      // 아직 내 기기가 없다면, PC 에 연결돼 신호를 보내오는 기기를 앱이 알아서 잡는다.
+      // 두 대 이상이 보이면 어느 것이 내 것인지 알 수 없으므로 직접 고르게 둔다.
+      if (!deviceId && next.devices.length === 0) {
+        const waiting = await api.pendingDevices(settings.serverUrl, token, ADOPT_WINDOW_MIN);
+        if (waiting.length === 1) {
+          const found = waiting[0].device_id;
+          await api.registerDevice(settings.serverUrl, token, found, settings.userId, '');
+          await update({ deviceId: found });
+          setNotice(`기기 연결 완료 — ${found}`);
+          return;
+        }
       }
 
       if (deviceId) {

@@ -173,7 +173,11 @@ int main() {
   check("가온 10분 종료: 세션 OFF", sessionState == SESS_OFF);
   check("가온 10분 종료: 히터 정지", SETPOINT_C == 0 && g_lastDuty == 0);
   check("가온 10분 종료: 온도 센서까지 정지", !g_tempSensorsActive);
+#if POWER_OFF_USE_DEEP_SLEEP
   check("가온 10분 종료: 기기 전원 종료(딥슬립)", g_deepSleepCalled);
+#else
+  check("가온 10분 종료: 히터·센서 끄고 대기", !g_deepSleepCalled && sessionState == SESS_OFF);
+#endif
 
   // =====================================================================
   // [변경 2+5] 60분 미입면 -> 히터·센서 정지 후 기기 종료
@@ -192,7 +196,11 @@ int main() {
   check("60분 미입면: 세션 OFF", sessionState == SESS_OFF);
   check("60분 미입면: 전 센서 정지",
         !g_bioSensorsActive && !g_tempSensorsActive && g_mpuAsleep && g_maxShutdown);
+#if POWER_OFF_USE_DEEP_SLEEP
   check("60분 미입면: 기기 전원 종료(딥슬립)", g_deepSleepCalled);
+#else
+  check("60분 미입면: 히터·센서 끄고 대기", !g_deepSleepCalled && sessionState == SESS_OFF);
+#endif
   check("60분 미입면: SOL 60분으로 기록",
         g_profile.nBins == 1 && fabsf(binMean(&g_profile.bins[0]) - 60.0f) < 0.01f);
 
@@ -218,6 +226,51 @@ int main() {
   check("막힌 적이 없으면 원인=알 수 없음", noOnsetReason() == NO_ONSET_REASON_UNKNOWN);
   calibState = CAL_FAILED;
   check("안정심박수를 못 잡았으면 원인=센서", noOnsetReason() == NO_ONSET_REASON_SENSOR);
+
+  // =====================================================================
+  // 센서 이탈(폭주) 감시 — 최대 출력인데 온도가 안 오르면 FAULT
+  // =====================================================================
+  g_runawaySuspected = false;
+  runawayStartMs = 0; runawayRefC = NAN;
+  resetSafety();
+  g_tempSensorsActive = true;
+
+  // 최대 출력으로 3분에서 1초 모자라게 밀되, 온도는 33도에서 꿈쩍하지 않는다
+  for (unsigned long t = 0; t < RUNAWAY_WINDOW_MS - 1000; t += 1000) {
+    g_fakeMillis += 1000;
+    checkHeaterRunaway(33.0f, PWM_MAX, g_fakeMillis);
+  }
+  check("최대 출력 3분 직전: 아직 정상", !g_runawaySuspected);
+
+  for (int i = 0; i < 2; i++) {                              // 3분을 채운다
+    g_fakeMillis += 1000;
+    checkHeaterRunaway(33.0f, PWM_MAX, g_fakeMillis);
+  }
+  check("최대 출력 3분 + 온도 정지: 센서 이탈로 판정", g_runawaySuspected);
+  check("센서 이탈이면 이상 상태로 분류", classifyAbnormal(33.0f, 33.0f, 33.0f, 33.0f) == STATE_FAULT_SENSOR);
+
+  for (int i = 0; i < 6; i++) step(33.0f, 33.0f);            // 5초 지속 -> 래치
+  check("센서 이탈: FAULT 래치로 히터 차단", safetyState == STATE_FAULT_SENSOR);
+
+  // 온도가 정상적으로 오르는 동안에는 걸리지 않는다
+  g_runawaySuspected = false;
+  runawayStartMs = 0; runawayRefC = NAN;
+  float c = 30.0f;
+  for (unsigned long t = 0; t < RUNAWAY_WINDOW_MS * 2; t += 1000) {
+    g_fakeMillis += 1000;
+    c += 0.02f;                                              // 1분에 1.2도씩 상승
+    checkHeaterRunaway(c, PWM_MAX, g_fakeMillis);
+  }
+  check("온도가 오르는 중이면 정상으로 본다", !g_runawaySuspected);
+
+  // 출력이 최대가 아니면 감시 창을 열지 않는다
+  g_runawaySuspected = false;
+  runawayStartMs = 0; runawayRefC = NAN;
+  for (unsigned long t = 0; t < RUNAWAY_WINDOW_MS * 2; t += 1000) {
+    g_fakeMillis += 1000;
+    checkHeaterRunaway(33.0f, PWM_MAX / 2, g_fakeMillis);    // 50% 출력
+  }
+  check("출력이 낮으면 폭주 감시 대상 아님", !g_runawaySuspected);
 
   printf("\n%s (실패 %d건)\n", fails ? "일부 실패" : "모든 검증 통과", fails);
   return fails ? 1 : 0;
